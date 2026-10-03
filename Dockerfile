@@ -5,11 +5,17 @@ FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies if needed
+# Install Python & build requirements for npm packages with post-install checks (e.g. yt-dlp-exec)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python-is-python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package descriptors including committed package-lock.json
 COPY package*.json tsconfig.json ./
 
-# Install all dependencies (including devDependencies for TypeScript build)
-RUN npm ci || npm install
+# Deterministic dependency installation
+RUN npm ci
 
 # Copy source code and assets
 COPY src/ ./src/
@@ -29,13 +35,14 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
 # Install system dependencies required for production:
-# - python3: Required by yt-dlp to download media (TikTok, YouTube, FB, etc.)
+# - python3 & python-is-python3: Required by yt-dlp to download media (TikTok, YouTube, FB, etc.)
 # - ffmpeg: Audio/Video processing and format conversion
 # - ca-certificates: TLS/SSL verification for Cloud APIs
 # - curl: Container health checks
 # - dumb-init: PID 1 signal forwarding and zombie process reaping
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
+    python-is-python3 \
     ffmpeg \
     ca-certificates \
     curl \
