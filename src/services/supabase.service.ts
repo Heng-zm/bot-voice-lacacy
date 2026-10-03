@@ -1,6 +1,12 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { config } from '../config';
 import { logger } from '../utils/logger';
+
+// Guarantee global WebSocket availability across any Node.js environment
+if (typeof (globalThis as any).WebSocket === 'undefined') {
+    (globalThis as any).WebSocket = WebSocket;
+}
 
 const supabaseUrl = (config.SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
 const supabaseKey = (
@@ -19,6 +25,9 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured()
         auth: {
             persistSession: false,
             autoRefreshToken: false,
+        },
+        realtime: {
+            transport: WebSocket as any,
         }
     })
     : null;
