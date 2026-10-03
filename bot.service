@@ -1,0 +1,22 @@
+[Unit]
+Description=Telegram Bot Production Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/www/bot-voice-lacacy
+ExecStart=/usr/bin/node dist/bot.js
+Restart=always
+RestartSec=5
+KillMode=process
+Environment=NODE_ENV=production
+Environment=PORT=8080
+StandardOutput=append:/var/www/bot-voice-lacacy/logs/bot.log
+StandardError=append:/var/www/bot-voice-lacacy/logs/bot-error.log
+
+# Resource Limits
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

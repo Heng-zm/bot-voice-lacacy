@@ -1,0 +1,33 @@
+{
+  "name": "bot-voice-lacacy",
+  "version": "1.0.0",
+  "description": "Telegram bot with AI and Media Downloader",
+  "main": "dist/bot.js",
+  "scripts": {
+    "start": "node dist/bot.js",
+    "dev": "ts-node src/bot.ts",
+    "build": "tsc",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f telegram-bot",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop ecosystem.config.cjs",
+    "pm2:logs": "pm2 logs telegram-bot-production"
+  },
+  "dependencies": {
+    "@google/genai": "latest",
+    "@supabase/supabase-js": "^2.39.8",
+    "dotenv": "^16.4.5",
+    "ffmpeg-static": "^5.3.0",
+    "grammy": "^1.21.1",
+    "ioredis": "^6.0.0",
+    "node-edge-tts": "^1.2.10",
+    "yt-dlp-exec": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.25",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.2"
+  }
+}

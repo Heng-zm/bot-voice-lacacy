@@ -1,0 +1,31 @@
+# Environment variables & secrets (CRITICAL: NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# TypeScript compiled outputs
+dist/
+
+# Runtime downloads & media files
+downloads/*
+!downloads/.gitkeep
+
+# Application logs
+logs/*
+!logs/.gitkeep
+*.log
+
+# OS & Editor configurations
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
