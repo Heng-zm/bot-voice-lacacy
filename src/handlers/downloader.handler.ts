@@ -221,8 +221,14 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
         }
 
         releaseSlot = await downloadLimiter.acquire();
-        const filePath = isVideo ? await downloadMedia(url) : await downloadAudio(url);
+        const dlResult = isVideo ? await downloadMedia(url) : await downloadAudio(url);
         clearTimeout(progressTimer);
+
+        const filePath = dlResult ? (typeof dlResult === 'string' ? dlResult : dlResult.filePath) : null;
+        const thumbnailPath = dlResult && typeof dlResult === 'object' ? dlResult.thumbnailPath : undefined;
+        const mediaTitle = dlResult && typeof dlResult === 'object' ? dlResult.title : undefined;
+        const mediaArtist = dlResult && typeof dlResult === 'object' ? dlResult.artist : undefined;
+        const mediaDuration = dlResult && typeof dlResult === 'object' ? dlResult.duration : undefined;
 
         if (filePath && fs.existsSync(filePath)) {
             const stats = fs.statSync(filePath);
@@ -249,6 +255,9 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                     }, 15000);
                 }
                 try { fs.unlinkSync(filePath); } catch (e) {}
+                if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+                    try { fs.unlinkSync(thumbnailPath); } catch (e) {}
+                }
                 return;
             }
 
@@ -267,20 +276,40 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
             const cleanFileName = isVideo ? `${platform.name}_Video.mp4` : `${platform.name}_Audio.mp3`;
             let sendSuccess = false;
             const docKeyboard = new InlineKeyboard().url(isKm ? '📥 ទាញយក (Download)' : '📥 Download', url);
-            const mediaCaption = isVideo
-                ? `${platform.emoji} <b>${platform.name} - ${isKm ? 'វីដេអូ HD' : 'HD Video'}</b>\n📦 <b>${isKm ? 'ទំហំ' : 'Size'}:</b> ${fileSizeMb} MB`
-                : `${platform.emoji} <b>${platform.name} - ${isKm ? 'ចម្រៀង MP3' : 'MP3 Audio'}</b>\n📦 <b>${isKm ? 'ទំហំ' : 'Size'}:</b> ${fileSizeMb} MB`;
+
+            const safeTitle = mediaTitle ? mediaTitle.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 100) : null;
+            const safeArtist = mediaArtist ? mediaArtist.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 60) : null;
+
+            let mediaCaption = isVideo
+                ? `${platform.emoji} <b>${platform.name} - ${isKm ? 'វីដេអូ HD' : 'HD Video'}</b>`
+                : `${platform.emoji} <b>${platform.name} - ${isKm ? 'ចម្រៀង MP3' : 'MP3 Audio'}</b>`;
+
+            if (safeTitle) {
+                mediaCaption += `\n📌 <b>${isKm ? 'ចំណងជើង' : 'Title'}:</b> <code>${safeTitle}</code>`;
+            }
+            if (safeArtist) {
+                mediaCaption += `\n👤 <b>${isKm ? 'អ្នកបង្កើត' : 'Artist'}:</b> <code>${safeArtist}</code>`;
+            }
+            mediaCaption += `\n📦 <b>${isKm ? 'ទំហំ' : 'Size'}:</b> ${fileSizeMb} MB`;
 
             // 1. Send as native Video player if user chose Video
             if (isVideo) {
                 try {
-                    await ctx.replyWithVideo(new InputFile(filePath, cleanFileName), {
+                    const videoOptions: any = {
                         caption: mediaCaption,
                         parse_mode: 'HTML',
                         reply_markup: docKeyboard,
                         reply_parameters: userMsgId ? { message_id: userMsgId } : undefined,
                         supports_streaming: true
-                    });
+                    };
+                    if (mediaDuration && mediaDuration > 0) {
+                        videoOptions.duration = Math.round(mediaDuration);
+                    }
+                    if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+                        videoOptions.thumbnail = new InputFile(thumbnailPath);
+                    }
+
+                    await ctx.replyWithVideo(new InputFile(filePath, cleanFileName), videoOptions);
                     sendSuccess = true;
                     logger.success('DOWNLOADER', `Video stream sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
                 } catch (vErr) {
@@ -289,12 +318,22 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
             } else {
                 // 2. Send as Telegram Audio Player if user chose MP3 Audio
                 try {
-                    await ctx.replyWithAudio(new InputFile(filePath, cleanFileName), {
+                    const audioOptions: any = {
                         caption: mediaCaption,
                         parse_mode: 'HTML',
                         reply_markup: docKeyboard,
                         reply_parameters: userMsgId ? { message_id: userMsgId } : undefined
-                    });
+                    };
+                    if (safeTitle) audioOptions.title = safeTitle.slice(0, 80);
+                    if (safeArtist) audioOptions.performer = safeArtist.slice(0, 50);
+                    if (mediaDuration && mediaDuration > 0) {
+                        audioOptions.duration = Math.round(mediaDuration);
+                    }
+                    if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+                        audioOptions.thumbnail = new InputFile(thumbnailPath);
+                    }
+
+                    await ctx.replyWithAudio(new InputFile(filePath, cleanFileName), audioOptions);
                     sendSuccess = true;
                     logger.success('DOWNLOADER', `MP3 Audio sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
                 } catch (audioErr) {
@@ -324,9 +363,12 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                 }
             }
 
-            // Clean up downloaded file safely
+            // Clean up downloaded file & thumbnail safely
             if (fs.existsSync(filePath)) {
                 try { fs.unlinkSync(filePath); } catch (e) {}
+            }
+            if (thumbnailPath && fs.existsSync(thumbnailPath)) {
+                try { fs.unlinkSync(thumbnailPath); } catch (e) {}
             }
         } else {
             const closeBtn = new InlineKeyboard().text('🗑️ លុបសារ (Delete)', 'delete_this_msg');

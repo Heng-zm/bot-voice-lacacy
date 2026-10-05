@@ -171,11 +171,22 @@ export function isTikTokOrDouyin(url: string): boolean {
     }
 }
 
+export interface DownloadResult {
+    filePath: string;
+    thumbnailPath?: string;
+    title?: string;
+    artist?: string;
+    duration?: number;
+    width?: number;
+    height?: number;
+}
+
 /**
  * Direct high-speed TikTok/Douyin media extractor using TikWM API.
- * Bypasses Python and yt-dlp entirely, delivers watermark-free HD video and direct MP3 audio.
+ * Bypasses Python and yt-dlp entirely, delivers watermark-free HD video and direct MP3 audio
+ * with embedded ID3 tags, artist/title metadata, and high-resolution cover artwork.
  */
-export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): Promise<string | null> {
+export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): Promise<DownloadResult | null> {
     const timestamp = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
     try {
         logger.info('DOWNLOADER_TIKTOK', `Requesting TikTok media info from TikWM API for: ${safeUrl}`);
@@ -207,14 +218,22 @@ export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): P
         const mediaData = data.data;
         let mediaUrl: string | undefined;
         let ext: string;
+        let title: string | undefined;
+        let artist: string | undefined;
+        let coverUrl: string | undefined;
 
         if (isVideo) {
-            // Prioritize HD or clean watermark-free video
             mediaUrl = mediaData.hdplay || mediaData.play || mediaData.wmplay;
             ext = 'mp4';
+            title = (mediaData.title || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 100);
+            artist = mediaData.author?.nickname || mediaData.author?.unique_id || 'TikTok';
+            coverUrl = mediaData.origin_cover || mediaData.cover;
         } else {
             mediaUrl = mediaData.music;
             ext = 'mp3';
+            title = (mediaData.music_info?.title || mediaData.title || 'TikTok Audio').replace(/[\r\n]+/g, ' ').trim().slice(0, 80);
+            artist = mediaData.music_info?.author || mediaData.author?.nickname || 'TikTok';
+            coverUrl = mediaData.music_info?.cover || mediaData.origin_cover || mediaData.cover;
         }
 
         if (!mediaUrl) {
@@ -268,40 +287,125 @@ export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): P
                 .pipe(fileStream)
         );
 
-        if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
-            // Remux with faststart if it's video and ffmpeg is available so Telegram can stream and play natively
-            if (isVideo && ffmpegPath) {
-                try {
-                    const remuxedPath = targetPath.replace('.mp4', '_fast.mp4');
+        if (!fs.existsSync(targetPath) || fs.statSync(targetPath).size === 0) {
+            return null;
+        }
+
+        let thumbnailPath: string | undefined;
+
+        // Download & convert cover image to standard JPEG if ffmpeg is available
+        if (coverUrl && ffmpegPath) {
+            try {
+                const coverRes = await fetch(coverUrl, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+                });
+                if (coverRes.ok && coverRes.body) {
+                    const rawCoverPath = path.join(DOWNLOAD_DIR, `${timestamp}_raw_cover`);
+                    const jpgCoverPath = path.join(DOWNLOAD_DIR, `${timestamp}_thumb.jpg`);
+                    const coverOut = fs.createWriteStream(rawCoverPath);
+                    await finished(Readable.fromWeb(coverRes.body as any).pipe(coverOut));
+
                     const { execFile } = await import('child_process');
                     const { promisify } = await import('util');
                     const execFileAsync = promisify(execFile);
 
+                    // Convert to standard JPEG (handles WebP/PNG/JPEG effortlessly)
                     await execFileAsync(ffmpegPath, [
                         '-y',
-                        '-i', targetPath,
-                        '-map', '0:v:0',
-                        '-map', '0:a:0?',
-                        '-c', 'copy',
-                        '-movflags', '+faststart',
-                        remuxedPath
-                    ], { timeout: 15000 });
+                        '-i', rawCoverPath,
+                        '-frames:v', '1',
+                        '-q:v', '2',
+                        jpgCoverPath
+                    ], { timeout: 10000 });
+
+                    try { fs.unlinkSync(rawCoverPath); } catch (e) {}
+
+                    if (fs.existsSync(jpgCoverPath) && fs.statSync(jpgCoverPath).size > 0) {
+                        thumbnailPath = jpgCoverPath;
+                        logger.info('DOWNLOADER_TIKTOK', `Cover artwork converted to JPEG successfully`);
+                    }
+                }
+            } catch (covErr: any) {
+                logger.warn('DOWNLOADER_TIKTOK', `Cover download/conversion skipped: ${covErr.message}`);
+            }
+        }
+
+        // Apply metadata and cover embedding via FFmpeg
+        if (ffmpegPath) {
+            try {
+                const { execFile } = await import('child_process');
+                const { promisify } = await import('util');
+                const execFileAsync = promisify(execFile);
+
+                if (isVideo) {
+                    const remuxedPath = targetPath.replace('.mp4', '_tagged.mp4');
+                    const ffmpegArgs = ['-y', '-i', targetPath];
+
+                    if (thumbnailPath) {
+                        ffmpegArgs.push('-i', thumbnailPath);
+                        ffmpegArgs.push('-map', '0:v:0', '-map', '0:a:0?', '-map', '1');
+                        ffmpegArgs.push('-c:v:0', 'copy', '-c:a', 'copy', '-c:v:1', 'copy');
+                        ffmpegArgs.push('-disposition:v:1', 'attached_pic');
+                    } else {
+                        ffmpegArgs.push('-map', '0:v:0', '-map', '0:a:0?');
+                        ffmpegArgs.push('-c', 'copy');
+                    }
+
+                    ffmpegArgs.push('-movflags', '+faststart');
+                    if (title) ffmpegArgs.push('-metadata', `title=${title}`);
+                    if (artist) ffmpegArgs.push('-metadata', `artist=${artist}`);
+                    ffmpegArgs.push(remuxedPath);
+
+                    await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 20000 });
 
                     if (fs.existsSync(remuxedPath) && fs.statSync(remuxedPath).size > 0) {
                         fs.unlinkSync(targetPath);
                         fs.renameSync(remuxedPath, targetPath);
-                        logger.info('DOWNLOADER_TIKTOK', `Remuxed TikTok video with faststart and video stream first`);
+                        logger.info('DOWNLOADER_TIKTOK', `Embedded metadata & cover into MP4 successfully`);
                     }
-                } catch (remuxErr: any) {
-                    logger.warn('DOWNLOADER_TIKTOK', `FFmpeg faststart remux skipped: ${remuxErr.message}`);
-                }
-            }
+                } else {
+                    // Audio: embed ID3v2 tag and album cover
+                    const taggedPath = targetPath.replace('.mp3', '_tagged.mp3');
+                    const ffmpegArgs = ['-y', '-i', targetPath];
 
-            logger.success('DOWNLOADER_TIKTOK', `Successfully downloaded TikTok ${isVideo ? 'video' : 'audio'} via TikWM: ${targetFilename} (${(fs.statSync(targetPath).size / 1024 / 1024).toFixed(2)} MB)`);
-            return targetPath;
+                    if (thumbnailPath) {
+                        ffmpegArgs.push('-i', thumbnailPath);
+                        ffmpegArgs.push('-map', '0:a', '-map', '1:0');
+                        ffmpegArgs.push('-c', 'copy');
+                        ffmpegArgs.push('-id3v2_version', '3');
+                        ffmpegArgs.push('-metadata:s:v', 'title=Album cover');
+                        ffmpegArgs.push('-metadata:s:v', 'comment=Cover (front)');
+                    } else {
+                        ffmpegArgs.push('-c', 'copy', '-id3v2_version', '3');
+                    }
+
+                    if (title) ffmpegArgs.push('-metadata', `title=${title}`);
+                    if (artist) ffmpegArgs.push('-metadata', `artist=${artist}`);
+                    ffmpegArgs.push('-metadata', 'album=TikTok Audio');
+                    ffmpegArgs.push(taggedPath);
+
+                    await execFileAsync(ffmpegPath, ffmpegArgs, { timeout: 15000 });
+
+                    if (fs.existsSync(taggedPath) && fs.statSync(taggedPath).size > 0) {
+                        fs.unlinkSync(targetPath);
+                        fs.renameSync(taggedPath, targetPath);
+                        logger.info('DOWNLOADER_TIKTOK', `Embedded ID3v2 metadata & album cover into MP3 successfully`);
+                    }
+                }
+            } catch (remuxErr: any) {
+                logger.warn('DOWNLOADER_TIKTOK', `FFmpeg metadata tagging skipped: ${remuxErr.message}`);
+            }
         }
 
-        return null;
+        logger.success('DOWNLOADER_TIKTOK', `Successfully downloaded & tagged TikTok ${isVideo ? 'video' : 'audio'}: ${targetFilename} (${(fs.statSync(targetPath).size / 1024 / 1024).toFixed(2)} MB)`);
+
+        return {
+            filePath: targetPath,
+            thumbnailPath,
+            title,
+            artist,
+            duration: mediaData.duration || 0
+        };
     } catch (err: any) {
         logger.warn('DOWNLOADER_TIKTOK', `Direct TikTok download failed: ${err.message}`);
         try {
@@ -360,7 +464,7 @@ setInterval(() => {
     cleanOldDownloads().catch(() => {});
 }, 5 * 60 * 1000);
 
-export async function downloadMedia(url: string): Promise<string | null> {
+export async function downloadMedia(url: string): Promise<DownloadResult | null> {
     const check = validateSafeMediaUrl(url);
     if (!check.isValid || !check.sanitizedUrl) {
         logger.warn('DOWNLOADER_SEC', `Rejected unsafe download URL: ${url} (${check.error})`);
@@ -419,6 +523,8 @@ export async function downloadMedia(url: string): Promise<string | null> {
         if (ffmpegPath) {
             dlpOptions.ffmpegLocation = ffmpegPath;
             dlpOptions.mergeOutputFormat = 'mp4';
+            dlpOptions.embedMetadata = true;
+            dlpOptions.embedThumbnail = true;
         }
 
         // Use smart binary runner (supports standalone Linux binary)
@@ -436,7 +542,7 @@ export async function downloadMedia(url: string): Promise<string | null> {
         if (downloadedFile) {
             const filePath = path.join(DOWNLOAD_DIR, downloadedFile);
             logger.success('DOWNLOADER', `Download succeeded: ${downloadedFile}`);
-            return filePath;
+            return { filePath };
         }
         logger.warn('DOWNLOADER', `File not found in download directory after yt-dlp run for: ${safeUrl}`);
         return null;
@@ -455,7 +561,7 @@ export async function downloadMedia(url: string): Promise<string | null> {
     }
 }
 
-export async function downloadAudio(url: string): Promise<string | null> {
+export async function downloadAudio(url: string): Promise<DownloadResult | null> {
     const check = validateSafeMediaUrl(url);
     if (!check.isValid || !check.sanitizedUrl) {
         logger.warn('DOWNLOADER_SEC', `Rejected unsafe audio URL: ${url} (${check.error})`);
@@ -503,6 +609,8 @@ export async function downloadAudio(url: string): Promise<string | null> {
 
         if (ffmpegPath) {
             dlpOptions.ffmpegLocation = ffmpegPath;
+            dlpOptions.embedMetadata = true;
+            dlpOptions.embedThumbnail = true;
         }
 
         // Use smart binary runner (supports standalone Linux binary)
@@ -520,7 +628,7 @@ export async function downloadAudio(url: string): Promise<string | null> {
         if (downloadedFile) {
             const filePath = path.join(DOWNLOAD_DIR, downloadedFile);
             logger.success('DOWNLOADER', `Audio extraction succeeded: ${downloadedFile}`);
-            return filePath;
+            return { filePath };
         }
 
         logger.warn('DOWNLOADER', `Audio file not found in download directory after run for: ${safeUrl}`);
