@@ -293,47 +293,55 @@ export async function generateNeuralTTS(
 
     const langConfig = TTS_LANGUAGES[lang] || TTS_LANGUAGES['km'];
     const voice = langConfig.voices[gender] || langConfig.voices['female'];
+    const altGender: VoiceGender = gender === 'male' ? 'female' : 'male';
+    const altVoice = langConfig.voices[altGender] || langConfig.voices['female'];
     const edgeLang = langConfig.edgeLang;
     const filename = `neural_tts_${lang}_${gender}_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`;
     const outputPath = path.join(DOWNLOAD_DIR, filename);
 
-    // Attempt 1: Studio Quality 96kbps 24kHz Edge Neural TTS (Ultra-realistic)
+    // Attempt 1: Fast 48kbps Edge Neural TTS with 7000ms timeout
     try {
         const edgeTts = new EdgeTTS({
             voice,
             lang: edgeLang,
-            outputFormat: 'audio-24khz-96kbitrate-mono-mp3',
-            timeout: 15000
+            outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
+            timeout: 7000
         });
         await edgeTts.ttsPromise(clean.substring(0, 1500), outputPath);
 
         if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-            logger.info('NEURAL_TTS', `Generated ${gender} neural voice for ${lang} (${clean.length} chars, studio quality)`);
+            logger.info('NEURAL_TTS', `Generated ${gender} neural voice for ${lang} (${clean.length} chars)`);
             return outputPath;
         }
-    } catch (err1) {
-        logger.warn('NEURAL_TTS', `First EdgeTTS attempt failed for ${lang}-${gender}, retrying...`, err1);
+    } catch (err1: any) {
+        if (fs.existsSync(outputPath)) {
+            try { fs.unlinkSync(outputPath); } catch (e) {}
+        }
+        logger.warn('NEURAL_TTS', `First EdgeTTS attempt failed for ${lang}-${gender} (${err1?.message || err1}), retrying with alt voice...`);
     }
 
-    // Attempt 2: Standard 48kbps Edge Neural TTS (retry before fallback)
+    // Attempt 2: Fast retry with alternative voice (5000ms timeout)
     try {
         const retryEdgeTts = new EdgeTTS({
-            voice,
+            voice: altVoice,
             lang: edgeLang,
             outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
-            timeout: 15000
+            timeout: 5000
         });
         await retryEdgeTts.ttsPromise(clean.substring(0, 1200), outputPath);
 
         if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-            logger.info('NEURAL_TTS', `Generated ${gender} neural voice on retry for ${lang}`);
+            logger.info('NEURAL_TTS', `Generated fallback ${altGender} neural voice on retry for ${lang}`);
             return outputPath;
         }
-    } catch (err2) {
-        logger.error('NEURAL_TTS', `Both EdgeTTS attempts failed for ${lang}-${gender}`, err2);
+    } catch (err2: any) {
+        if (fs.existsSync(outputPath)) {
+            try { fs.unlinkSync(outputPath); } catch (e) {}
+        }
+        logger.error('NEURAL_TTS', `Both EdgeTTS attempts failed for ${lang}-${gender} (${err2?.message || err2}). Falling back to Google TTS.`);
     }
 
-    // Fallback only if Edge servers are unreachable
+    // Fallback: Ultra-fast Google TTS
     return await generateTTS(clean, lang);
 }
 
