@@ -31,7 +31,7 @@ import {
     getAdminState,
     setAdminState
 } from '../services/welcome.service';
-import { getMainMenuKeyboard, getMainMenuInlineKeyboard } from './start.handler';
+import { getMainMenuKeyboard } from './start.handler';
 import { escapeHtml } from '../utils/telegram-format';
 import fs from 'fs';
 import path from 'path';
@@ -1418,10 +1418,7 @@ adminHandler.callbackQuery('admin_preview_welcome', async (ctx) => {
     await ctx.answerCallbackQuery({ text: 'កំពុងបង្កើតគំរូ Preview... 👀' });
 
     const statuses = await getAllFeaturesStatus();
-    const [inlineKb, replyKb] = await Promise.all([
-        getMainMenuInlineKeyboard(userId),
-        getMainMenuKeyboard(userId)
-    ]);
+    const replyKb = await getMainMenuKeyboard(userId);
 
     const config = await getCustomWelcomeConfig();
     const rawCaption = config.caption || getDefaultWelcomeCaption(statuses);
@@ -1436,24 +1433,20 @@ adminHandler.callbackQuery('admin_preview_welcome', async (ctx) => {
             await ctx.replyWithPhoto(config.photoFileId, {
                 caption: formattedCaption,
                 parse_mode: 'HTML',
-                reply_markup: inlineKb
+                reply_markup: replyKb
             });
         } catch (e) {
             await ctx.reply(formattedCaption, {
                 parse_mode: 'HTML',
-                reply_markup: inlineKb
+                reply_markup: replyKb
             });
         }
     } else {
         await ctx.reply(formattedCaption, {
             parse_mode: 'HTML',
-            reply_markup: inlineKb
+            reply_markup: replyKb
         });
     }
-
-    await ctx.reply('👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖', {
-        reply_markup: replyKb
-    });
 
     const backMenu = new InlineKeyboard()
         .text('🔙 ត្រឡប់ទៅ Welcome Settings', 'admin_welcome')

@@ -153,16 +153,12 @@ startHandler.command(['start', 'menu'], async (ctx) => {
                     // Also send main menu below it so friend can use the bot
                     const t = getTranslation(userId);
                     const firstName = ctx.from?.first_name || (isKm ? 'មិត្តភក្តិ' : 'friend');
-                    const [statuses, inlineKb, replyKb] = await Promise.all([
+                    const [statuses, replyKb] = await Promise.all([
                         getAllFeaturesStatus(),
-                        getMainMenuInlineKeyboard(userId),
                         getMainMenuKeyboard(userId)
                     ]);
                     await ctx.reply(t.welcome(escapeHtml(firstName), statuses), {
                         parse_mode: 'HTML',
-                        reply_markup: inlineKb
-                    });
-                    await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
                         reply_markup: replyKb
                     });
                     return;
@@ -187,16 +183,12 @@ startHandler.command(['start', 'menu'], async (ctx) => {
 
                 const t = getTranslation(userId);
                 const firstName = ctx.from?.first_name || (isKm ? 'មិត្តភក្តិ' : 'friend');
-                const [statuses, inlineKb, replyKb] = await Promise.all([
+                const [statuses, replyKb] = await Promise.all([
                     getAllFeaturesStatus(),
-                    getMainMenuInlineKeyboard(userId),
                     getMainMenuKeyboard(userId)
                 ]);
                 await ctx.reply(t.welcome(escapeHtml(firstName), statuses), {
                     parse_mode: 'HTML',
-                    reply_markup: inlineKb
-                });
-                await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
                     reply_markup: replyKb
                 });
                 return;
@@ -204,9 +196,8 @@ startHandler.command(['start', 'menu'], async (ctx) => {
         }
     }
 
-    const [statuses, inlineKb, replyKb] = await Promise.all([
+    const [statuses, replyKb] = await Promise.all([
         getAllFeaturesStatus(),
-        getMainMenuInlineKeyboard(userId),
         getMainMenuKeyboard(userId)
     ]);
 
@@ -228,9 +219,6 @@ startHandler.command(['start', 'menu'], async (ctx) => {
                 await ctx.replyWithPhoto(customWelcome.photoFileId, {
                     caption: formattedCaption,
                     parse_mode: 'HTML',
-                    reply_markup: inlineKb
-                });
-                await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
                     reply_markup: replyKb
                 });
                 return;
@@ -242,28 +230,22 @@ startHandler.command(['start', 'menu'], async (ctx) => {
         try {
             await ctx.reply(formattedCaption, {
                 parse_mode: 'HTML',
-                reply_markup: inlineKb
-            });
-            await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
                 reply_markup: replyKb
             });
         } catch (textErr) {
             logger.warn('START_CUSTOM_WELCOME', 'HTML parse error in custom welcome, fallback to plain text', textErr);
             await ctx.reply(customWelcome.caption || 'Welcome!', {
-                reply_markup: inlineKb
+                reply_markup: replyKb
             });
         }
         return;
     }
 
-    // Default system welcome start handler with Dynamic Inline & Reply Keyboards
+    // Default system welcome start handler with Dynamic Reply Keyboard
     const t = getTranslation(userId);
     await ctx.reply(t.welcome(escapeHtml(firstName), statuses), { 
         parse_mode: 'HTML',
-        reply_markup: inlineKb 
-    });
-    await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
-        reply_markup: replyKb
+        reply_markup: replyKb 
     });
 });
 
@@ -295,14 +277,11 @@ startHandler.hears(backButtonAliases, async (ctx) => {
         }
     } catch (e) {}
 
-    const [inlineKb, replyKb] = await Promise.all([
-        getMainMenuInlineKeyboard(userId),
-        getMainMenuKeyboard(userId)
-    ]);
+    const replyKb = await getMainMenuKeyboard(userId);
 
     await ctx.reply(t.returned_main, {
         parse_mode: 'HTML',
-        reply_markup: inlineKb
+        reply_markup: replyKb
     });
 });
 
@@ -312,22 +291,16 @@ startHandler.callbackQuery(['back_main', 'main_menu'], async (ctx) => {
     const t = getTranslation(userId);
     await ctx.answerCallbackQuery();
 
-    const [inlineKb, replyKb] = await Promise.all([
-        getMainMenuInlineKeyboard(userId),
-        getMainMenuKeyboard(userId)
-    ]);
+    const replyKb = await getMainMenuKeyboard(userId);
 
     try {
-        await ctx.editMessageText(t.returned_main, {
-            parse_mode: 'HTML',
-            reply_markup: inlineKb
-        });
-    } catch (e) {
-        await ctx.reply(t.returned_main, {
-            parse_mode: 'HTML',
-            reply_markup: inlineKb
-        });
-    }
+        await ctx.deleteMessage();
+    } catch (e) {}
+
+    await ctx.reply(t.returned_main, {
+        parse_mode: 'HTML',
+        reply_markup: replyKb
+    });
 });
 
 // ==========================================
