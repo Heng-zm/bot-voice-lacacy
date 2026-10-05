@@ -745,11 +745,17 @@ audioHandler.on(':voice', async (ctx) => {
     const voice = ctx.message.voice;
     const t = getTranslation(ctx.from?.id);
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    const replyOptions: any = { parse_mode: 'HTML' };
+    if (ctx.message?.message_id) {
+        replyOptions.reply_parameters = { message_id: ctx.message.message_id };
+    }
+
+    const title = isKm ? '🎧 <b>សារសំឡេង (Voice Note AI)</b>' : '🎧 <b>Voice Note AI Assistant</b>';
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
+
     const processingMsg = await ctx.reply(
-        isKm
-            ? '🎧 <b>[ ▰▱▱▱▱ 25% ]</b> <i>កំពុងទទួល និងស្តាប់សារសំឡេងរបស់អ្នក...</i>'
-            : '🎧 <b>[ ▰▱▱▱▱ 25% ]</b> <i>Receiving and listening to your voice note...</i>',
-        { parse_mode: 'HTML' }
+        `${title}\n${divider}\n⏳ <b>${isKm ? 'ស្ថានភាព' : 'Status'}៖</b> <code>[ ▰▱▱▱▱ 25% ]</code>\n<i>${isKm ? 'កំពុងទទួល និងស្តាប់សារសំឡេងរបស់អ្នក...' : 'Receiving and listening to your voice note...'}</i>`,
+        replyOptions
     );
     
     try {
@@ -757,16 +763,11 @@ audioHandler.on(':voice', async (ctx) => {
     } catch (e) {}
 
     const transcribeTimer = setTimeout(async () => {
-        try {
-            await ctx.api.editMessageText(
-                ctx.chat.id,
-                processingMsg.message_id,
-                isKm
-                    ? '🎙️ <b>[ ▰▰▰▱▱ 70% ]</b> <i>Gemini AI កំពុងស្តាប់ សរសេរអត្ថបទ និងឆ្លើយតប...</i>'
-                    : '🎙️ <b>[ ▰▰▰▱▱ 70% ]</b> <i>Gemini AI transcribing audio and generating reply...</i>',
-                { parse_mode: 'HTML' }
-            );
-        } catch (e) {}
+        await safeEditMessage(
+            ctx,
+            processingMsg.message_id,
+            `${title}\n${divider}\n⚡ <b>${isKm ? 'ស្ថានភាព' : 'Status'}៖</b> <code>[ ▰▰▰▱▱ 70% ]</code>\n<i>${isKm ? 'Gemini AI កំពុងស្តាប់ សរសេរអត្ថបទ និងឆ្លើយតប...' : 'Gemini AI transcribing audio and generating reply...'}</i>`
+        );
     }, 1100);
     
     let localVoicePath: string | null = null;
@@ -793,13 +794,21 @@ audioHandler.on(':voice', async (ctx) => {
 
         const formattedReply = formatTelegramHtml(reply);
 
-        await ctx.api.editMessageText(
-            ctx.chat.id,
+        const voiceResultCard = 
+`${title}
+${divider}
+📝 <b>${isKm ? 'ការសរសេរតាមសំឡេង' : 'Voice Transcription'}៖</b>
+<blockquote>"${escapeHtml(transcription)}"</blockquote>
+
+🤖 <b>${isKm ? 'ចម្លើយពី AI' : 'AI Response'}៖</b>
+${formattedReply}
+${divider}
+🎙️ <i>ដំណើរការដោយ Gemini 3.6 • @voicekhaibot</i>`;
+
+        await safeEditMessage(
+            ctx,
             processingMsg.message_id,
-            `✨ <b>[ ▰▰▰▰▰ 100% ]</b>\n\n${t.voice_transcription}\n<i>"${escapeHtml(transcription)}"</i>\n\n${t.voice_response}\n${formattedReply}`,
-            {
-                parse_mode: 'HTML'
-            }
+            voiceResultCard
         );
 
         if (ctx.from?.id) {
@@ -809,12 +818,16 @@ audioHandler.on(':voice', async (ctx) => {
     } catch (error: any) {
         clearTimeout(transcribeTimer);
         logger.error('VOICE_NOTE', 'Voice note processing error', error, { userId: ctx.from?.id });
-        await ctx.api.editMessageText(
-            ctx.chat.id,
+        const errorCard = 
+`${title}
+${divider}
+❌ <b>${isKm ? 'មិនអាចស្តាប់សារសំឡេងបានទេ' : 'Voice note processing failed'}៖</b>
+<i>${escapeHtml(error?.message || 'Error')}</i>`;
+        await safeEditMessage(
+            ctx,
             processingMsg.message_id,
-            isKm ? `🥺 សូមអភ័យទោស មិនអាចស្តាប់សារសំឡេងបានទេ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Sorry, I couldn't transcribe that voice note: ${escapeHtml(error?.message || 'Error')}`,
-            { parse_mode: 'HTML' }
-        ).catch(() => {});
+            errorCard
+        );
     } finally {
         if (localVoicePath && fs.existsSync(localVoicePath)) {
             try { fs.unlinkSync(localVoicePath); } catch (e) {}

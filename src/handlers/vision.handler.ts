@@ -4,9 +4,67 @@ import { config } from '../config';
 import { getTranslation, getUserLanguage } from '../utils/i18n';
 import { logger } from '../utils/logger';
 import { escapeHtml, formatTelegramHtml } from '../utils/telegram-format';
+import { safeEditMessage } from '../utils/animation';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
+
+/**
+ * UI Component: Renders the Vision OCR processing card with progress status.
+ */
+function renderVisionProcessingCard(stage: 'download' | 'analyzing', isKm: boolean): string {
+    const title = isKm ? '📸 <b>ស្កេនរូបភាព (Gemini 3.6 Vision OCR)</b>' : '📸 <b>Gemini 3.6 Vision OCR</b>';
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
+    
+    if (stage === 'download') {
+        const status = isKm
+            ? '⏳ <b>ស្ថានភាព៖</b> <code>[ ▰▱▱▱▱ 25% ]</code>\n<i>កំពុងទទួលយករូបភាពពី Telegram...</i>'
+            : '⏳ <b>Status:</b> <code>[ ▰▱▱▱▱ 25% ]</code>\n<i>Receiving image from Telegram...</i>';
+        return `${title}\n${divider}\n${status}`;
+    }
+    
+    const status = isKm
+        ? '⚡ <b>ស្ថានភាព៖</b> <code>[ ▰▰▰▱▱ 70% ]</code>\n<i>Gemini Vision OCR កំពុងស្កេន និងស្រង់អក្សរ...</i>'
+        : '⚡ <b>Status:</b> <code>[ ▰▰▰▱▱ 70% ]</code>\n<i>Gemini Vision OCR scanning and extracting text...</i>';
+    return `${title}\n${divider}\n${status}`;
+}
+
+/**
+ * UI Component: Renders the final Vision OCR extracted result card.
+ */
+function renderVisionResultCard(extractedText: string, isKm: boolean): string {
+    const title = isKm ? '📸 <b>ស្កេនរូបភាព (Gemini 3.6 Vision OCR)</b>' : '📸 <b>Gemini 3.6 Vision OCR</b>';
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const label = isKm ? '📝 <b>អត្ថបទដែលស្រង់បាន៖</b>' : '📝 <b>Extracted Text:</b>';
+    const footer = isKm 
+        ? '⚡ <i>ស្រង់អក្សរបានជោគជ័យ • @voicekhaibot</i>' 
+        : '⚡ <i>Extracted successfully • @voicekhaibot</i>';
+
+    const safeExtracted = extractedText.length > 3500
+        ? extractedText.substring(0, 3500) + (isKm ? '\n\n... (អត្ថបទវែង ត្រូវបានកាត់ខ្លីត្រឹម ៣៥០០ តួអក្សរ)' : '\n\n... (Text truncated at 3,500 characters)')
+        : extractedText;
+
+    const safeText = escapeHtml(safeExtracted.trim());
+    const content = safeText.length > 0 
+        ? `<blockquote>${safeText}</blockquote>` 
+        : (isKm ? '<i>⚠️ មិនមានអក្សរនៅក្នុងរូបភាពនេះទេ</i>' : '<i>⚠️ No text detected in this image</i>');
+
+    return `${title}\n${divider}\n${label}\n\n${content}\n${divider}\n${footer}`;
+}
+
+/**
+ * UI Component: Renders the Vision OCR error card.
+ */
+function renderVisionErrorCard(errorMessage: string, isKm: boolean): string {
+    const title = isKm ? '📸 <b>ស្កេនរូបភាព (Gemini 3.6 Vision OCR)</b>' : '📸 <b>Gemini 3.6 Vision OCR</b>';
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const errorLabel = isKm ? '❌ <b>ការស្កេនមិនជោគជ័យ៖</b>' : '❌ <b>Scan Failed:</b>';
+    const hint = isKm 
+        ? '💡 <i>សូមសាកល្បងផ្ញើរូបភាពច្បាស់ ឬឯកសារ (Document) ម្តងទៀត</i>' 
+        : '💡 <i>Please try again with a clearer photo or send as Document</i>';
+
+    return `${title}\n${divider}\n${errorLabel}\n<i>${escapeHtml(errorMessage)}</i>\n\n${hint}`;
+}
 
 const downloadFile = (url: string, dest: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -76,11 +134,14 @@ async function processImageFile(ctx: any, fileId: string) {
         }
     }
 
+    const replyOptions: any = { parse_mode: 'HTML' };
+    if (ctx.message?.message_id) {
+        replyOptions.reply_parameters = { message_id: ctx.message.message_id };
+    }
+
     const processingMsg = await ctx.reply(
-        isKm 
-            ? '🔍 <b>[ ▰▱▱▱▱ 25% ]</b> <i>កំពុងទទួលយករូបភាពពី Telegram...</i>' 
-            : '🔍 <b>[ ▰▱▱▱▱ 25% ]</b> <i>Receiving image from Telegram...</i>',
-        { parse_mode: 'HTML' }
+        renderVisionProcessingCard('download', isKm),
+        replyOptions
     );
     
     try {
@@ -88,16 +149,11 @@ async function processImageFile(ctx: any, fileId: string) {
     } catch (e) {}
 
     const ocrTimer = setTimeout(async () => {
-        try {
-            await ctx.api.editMessageText(
-                ctx.chat.id,
-                processingMsg.message_id,
-                isKm 
-                    ? '📸 <b>[ ▰▰▰▱▱ 70% ]</b> <i>Gemini Vision OCR កំពុងស្កេន និងស្រង់អក្សរ...</i>' 
-                    : '📸 <b>[ ▰▰▰▱▱ 70% ]</b> <i>Gemini Vision OCR scanning and extracting text...</i>',
-                { parse_mode: 'HTML' }
-            );
-        } catch (e) {}
+        await safeEditMessage(
+            ctx,
+            processingMsg.message_id,
+            renderVisionProcessingCard('analyzing', isKm)
+        );
     }, 1100);
 
     let filePath: string | null = null;
@@ -126,29 +182,22 @@ async function processImageFile(ctx: any, fileId: string) {
         const extractedText = await extractTextFromImage(filePath);
         clearTimeout(ocrTimer);
         
-        const safeExtracted = extractedText.length > 3500
-            ? extractedText.substring(0, 3500) + (isKm ? '\n\n... (អត្ថបទវែង ត្រូវបានកាត់ខ្លីត្រឹម ៣៥០០ តួអក្សរ)' : '\n\n... (Text truncated at 3,500 characters)')
-            : extractedText;
+        const resultCard = renderVisionResultCard(extractedText, isKm);
 
-        const safeText = escapeHtml(safeExtracted);
-
-        await ctx.api.editMessageText(
-            ctx.chat.id, 
-            processingMsg.message_id, 
-            `✨ <b>[ ▰▰▰▰▰ 100% ]</b> ${t.vision_result}\n\n${safeText}`, 
-            {
-                parse_mode: 'HTML'
-            }
+        await safeEditMessage(
+            ctx,
+            processingMsg.message_id,
+            resultCard
         );
     } catch (error: any) {
         clearTimeout(ocrTimer);
         logger.error('VISION', 'Vision photo processing error', error, { userId: ctx.from?.id, fileId });
-        await ctx.api.editMessageText(
-            ctx.chat.id, 
-            processingMsg.message_id, 
-            isKm ? `🥺 សូមអភ័យទោស មិនអាចដំណើរការរូបភាពនេះទេ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Sorry, I couldn't process that image: ${escapeHtml(error?.message || 'Error')}`,
-            { parse_mode: 'HTML' }
-        ).catch(() => {});
+        const errorCard = renderVisionErrorCard(error?.message || 'Error', isKm);
+        await safeEditMessage(
+            ctx,
+            processingMsg.message_id,
+            errorCard
+        );
     } finally {
         if (filePath && fs.existsSync(filePath)) {
             try { fs.unlinkSync(filePath); } catch (e) {}
@@ -180,16 +229,23 @@ visionHandler.callbackQuery('translate_khmer', async (ctx) => {
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
     await ctx.answerCallbackQuery({ text: t.vision_translating });
     
+    if (!ctx.callbackQuery.message) return;
+    const msgId = ctx.callbackQuery.message.message_id;
+
     try {
-        const originalMessage = ctx.callbackQuery.message?.text || '';
+        const originalMessage = ctx.callbackQuery.message.text || '';
         const extractedText = originalMessage
+            .replace(/^📸[\s\S]*?━━━━━━━━━━━━━━━━━━━━━━━━━\n?/g, '')
+            .replace(/📝\s*អត្ថបទដែលស្រង់បាន[៖:]?/gu, '')
+            .replace(/📝\s*Extracted Text[៖:]?/gi, '')
             .replace(/^✨\s*\[\s*[▰▱\s\d%]+\]\s*/gu, '')
             .replace(/✨\s*អត្ថបទដែលស្រង់បាន[៖:]?/gu, '')
             .replace(/✨\s*Extracted Text[៖:]?/gi, '')
+            .replace(/━━━━━━━━━━━━━━━━━━━━━━━━━[\s\S]*?$/g, '')
             .trim();
         
         if (!extractedText) {
-            return ctx.editMessageText(isKm ? '❌ រកមិនឃើញអត្ថបទដើម្បីបកប្រែទេ។' : '❌ No text found to translate.');
+            return safeEditMessage(ctx, msgId, isKm ? '❌ រកមិនឃើញអត្ថបទដើម្បីបកប្រែទេ។' : '❌ No text found to translate.');
         }
 
         const prompt = `Translate the following text into accurate, natural, and polite Khmer. Output only the Khmer translation:\n\n${extractedText}`;
@@ -200,19 +256,20 @@ visionHandler.callbackQuery('translate_khmer', async (ctx) => {
             safeTranslation = safeTranslation.substring(0, 3500) + (isKm ? '\n\n... (អត្ថបទវែង ត្រូវបានកាត់ខ្លីត្រឹម ៣៥០០ តួអក្សរ)' : '\n\n... (Translation truncated at 3,500 characters)');
         }
 
-        const formattedTranslation = formatTelegramHtml(safeTranslation);
+        const translationCard = 
+`🇰🇭 <b>អត្ថបទបកប្រែជាភាសាខ្មែរ (Khmer Translation)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote>${escapeHtml(safeTranslation.trim())}</blockquote>
+━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ <i>បកប្រែដោយ Gemini 3.6 • @voicekhaibot</i>`;
 
-        await ctx.editMessageText(
-            `${t.vision_translated_title}\n\n${formattedTranslation}`, 
-            {
-                parse_mode: 'HTML'
-            }
-        );
+        await safeEditMessage(ctx, msgId, translationCard);
     } catch (error: any) {
         logger.error('VISION_TRANSLATE', 'OCR text translation to Khmer failed', error, { userId: ctx.from?.id });
-        await ctx.editMessageText(
-            isKm ? `🥺 ការបកប្រែបរាជ័យ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Translation failed: ${escapeHtml(error?.message || 'Error')}`, 
-            { parse_mode: 'HTML' }
-        ).catch(() => {});
+        await safeEditMessage(
+            ctx,
+            msgId,
+            isKm ? `🥺 ការបកប្រែបរាជ័យ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Translation failed: ${escapeHtml(error?.message || 'Error')}`
+        );
     }
 });
