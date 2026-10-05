@@ -196,7 +196,7 @@ bot.on('inline_query', async (ctx) => {
                     id: token,
                     voice_file_id: item.voiceFileId,
                     title: `🔊 ${cfg.flag} ${cfg.nameKm} / ${cfg.nativeName}`,
-                    caption: `${cfg.flag} <b>${cfg.nameKm} (${cfg.nativeName}) - Neural Voice ✨</b>\n<i>"${snippet}"</i>`,
+                    caption: '@voicekhaibot',
                     parse_mode: 'HTML'
                 }
             ], { cache_time: 10, is_personal: true });

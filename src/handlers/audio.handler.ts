@@ -50,16 +50,10 @@ function cleanSnippet(rawText?: string, maxLen = 100): string {
 }
 
 /**
- * Returns formatted caption for synthesized audio with Flag and Language info
+ * Returns formatted caption for synthesized audio with bot voice tag
  */
-export function getTTSCaption(lang: SupportedTTSLanguage, gender: VoiceGender, isKm: boolean): string {
-    const cfg = TTS_LANGUAGES[lang] || TTS_LANGUAGES['km'];
-    const genderStr = gender === 'male'
-        ? (isKm ? 'ប្រុស (Male)' : 'Male')
-        : (isKm ? 'ស្រី (Female)' : 'Female');
-    const langName = isKm ? cfg.nameKm : cfg.nameEn;
-    return `${cfg.flag} <b>${langName} (${cfg.nativeName})</b>\n` +
-           `🎙️ <b>សំឡេង (Voice):</b> <code>${genderStr} Neural ✨</code>`;
+export function getTTSCaption(_lang?: SupportedTTSLanguage, _gender?: VoiceGender, _isKm?: boolean): string {
+    return '@voicekhaibot';
 }
 
 /**
