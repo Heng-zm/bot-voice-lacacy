@@ -1,6 +1,8 @@
 import ytDlp from 'yt-dlp-exec';
 import path from 'path';
 import fs from 'fs';
+import { Readable, Transform } from 'stream';
+import { finished } from 'stream/promises';
 import { logger } from '../utils/logger';
 
 const DOWNLOAD_DIR = path.resolve(__dirname, '../../downloads');
@@ -20,6 +22,60 @@ try {
     }
 } catch (e) {
     ffmpegPath = null;
+}
+
+// Standalone yt-dlp binary path for Linux systems (bundles Python 3.10+ runtime)
+const LINUX_STANDALONE_BINARY = path.resolve(__dirname, '../../bin/yt-dlp_linux');
+let cachedYtDlpInstance: any = null;
+
+export async function getYtDlpRunner(): Promise<any> {
+    if (cachedYtDlpInstance) {
+        return cachedYtDlpInstance;
+    }
+
+    if (process.platform === 'linux') {
+        const potentialPaths = [
+            LINUX_STANDALONE_BINARY,
+            path.resolve(process.cwd(), 'bin/yt-dlp_linux'),
+            '/home/container/bin/yt-dlp_linux'
+        ];
+
+        for (const binPath of potentialPaths) {
+            if (fs.existsSync(binPath)) {
+                try {
+                    fs.chmodSync(binPath, 0o755);
+                    logger.info('DOWNLOADER', `Using standalone Linux yt-dlp binary: ${binPath}`);
+                    cachedYtDlpInstance = (ytDlp as any).create(binPath);
+                    return cachedYtDlpInstance;
+                } catch (e: any) {
+                    logger.warn('DOWNLOADER', `Failed to set execute permissions on ${binPath}: ${e.message}`);
+                }
+            }
+        }
+
+        // If not found, attempt to auto-download standalone Linux binary
+        try {
+            const binDir = path.dirname(LINUX_STANDALONE_BINARY);
+            if (!fs.existsSync(binDir)) {
+                fs.mkdirSync(binDir, { recursive: true });
+            }
+            logger.info('DOWNLOADER', 'Downloading standalone Linux yt-dlp binary (with bundled Python 3.10+)...');
+            const dlRes = await fetch('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux');
+            if (dlRes.ok && dlRes.body) {
+                const out = fs.createWriteStream(LINUX_STANDALONE_BINARY);
+                await finished(Readable.fromWeb(dlRes.body as any).pipe(out));
+                fs.chmodSync(LINUX_STANDALONE_BINARY, 0o755);
+                logger.info('DOWNLOADER', `Standalone Linux yt-dlp binary ready at: ${LINUX_STANDALONE_BINARY}`);
+                cachedYtDlpInstance = (ytDlp as any).create(LINUX_STANDALONE_BINARY);
+                return cachedYtDlpInstance;
+            }
+        } catch (dlErr: any) {
+            logger.warn('DOWNLOADER', `Auto-download of standalone Linux yt-dlp binary failed: ${dlErr.message}`);
+        }
+    }
+
+    cachedYtDlpInstance = ytDlp;
+    return cachedYtDlpInstance;
 }
 
 // Whitelisted media domains to eliminate SSRF and internal network access
@@ -104,6 +160,138 @@ export function validateSafeMediaUrl(rawUrl: string): { isValid: boolean; saniti
     return { isValid: true, sanitizedUrl: parsed.toString() };
 }
 
+export function isTikTokOrDouyin(url: string): boolean {
+    try {
+        const parsed = new URL(url);
+        const host = parsed.hostname.toLowerCase();
+        return host === 'tiktok.com' || host.endsWith('.tiktok.com') ||
+               host === 'douyin.com' || host.endsWith('.douyin.com');
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Direct high-speed TikTok/Douyin media extractor using TikWM API.
+ * Bypasses Python and yt-dlp entirely, delivers watermark-free HD video and direct MP3 audio.
+ */
+export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): Promise<string | null> {
+    const timestamp = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+        logger.info('DOWNLOADER_TIKTOK', `Requesting TikTok media info from TikWM API for: ${safeUrl}`);
+        const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(safeUrl)}&hd=1`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 20000);
+
+        const response = await fetch(apiUrl, {
+            signal: controller.signal,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept': 'application/json'
+            }
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            logger.warn('DOWNLOADER_TIKTOK', `TikWM API returned HTTP ${response.status}`);
+            return null;
+        }
+
+        const data: any = await response.json();
+        if (data.code !== 0 || !data.data) {
+            logger.warn('DOWNLOADER_TIKTOK', `TikWM API returned code ${data.code}: ${data.msg || 'No data'}`);
+            return null;
+        }
+
+        const mediaData = data.data;
+        let mediaUrl: string | undefined;
+        let ext: string;
+
+        if (isVideo) {
+            // Prioritize HD or clean watermark-free video
+            mediaUrl = mediaData.hdplay || mediaData.play || mediaData.wmplay;
+            ext = 'mp4';
+        } else {
+            mediaUrl = mediaData.music;
+            ext = 'mp3';
+        }
+
+        if (!mediaUrl) {
+            logger.warn('DOWNLOADER_TIKTOK', `No stream URL found in TikWM response for ${isVideo ? 'video' : 'audio'}`);
+            return null;
+        }
+
+        // Safeguard: Check size from metadata if available (Telegram 50MB limit)
+        if (isVideo && mediaData.size && mediaData.size > 49.5 * 1024 * 1024) {
+            throw new Error(`File size ${(mediaData.size / 1024 / 1024).toFixed(1)}MB exceeds Telegram 50MB limit`);
+        }
+
+        const targetFilename = `${timestamp}_tiktok_${mediaData.id || 'media'}.${ext}`;
+        const targetPath = path.join(DOWNLOAD_DIR, targetFilename);
+
+        const mediaStreamRes = await fetch(mediaUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Referer': 'https://www.tiktok.com/'
+            }
+        });
+
+        if (!mediaStreamRes.ok || !mediaStreamRes.body) {
+            logger.warn('DOWNLOADER_TIKTOK', `Failed to stream TikTok media: HTTP ${mediaStreamRes.status}`);
+            return null;
+        }
+
+        const contentLength = Number(mediaStreamRes.headers.get('content-length') || '0');
+        if (contentLength > 49.5 * 1024 * 1024) {
+            throw new Error(`File size ${(contentLength / 1024 / 1024).toFixed(1)}MB exceeds Telegram 50MB limit`);
+        }
+
+        const fileStream = fs.createWriteStream(targetPath);
+        let downloadedBytes = 0;
+        const maxBytes = 49.5 * 1024 * 1024;
+
+        const sizeLimiter = new Transform({
+            transform(chunk, _encoding, callback) {
+                downloadedBytes += chunk.length;
+                if (downloadedBytes > maxBytes) {
+                    callback(new Error(`File size exceeded 50MB limit during download`));
+                } else {
+                    callback(null, chunk);
+                }
+            }
+        });
+
+        await finished(
+            Readable.fromWeb(mediaStreamRes.body as any)
+                .pipe(sizeLimiter)
+                .pipe(fileStream)
+        );
+
+        if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
+            logger.success('DOWNLOADER_TIKTOK', `Successfully downloaded TikTok ${isVideo ? 'video' : 'audio'} via TikWM: ${targetFilename} (${(fs.statSync(targetPath).size / 1024 / 1024).toFixed(2)} MB)`);
+            return targetPath;
+        }
+
+        return null;
+    } catch (err: any) {
+        logger.warn('DOWNLOADER_TIKTOK', `Direct TikTok download failed: ${err.message}`);
+        try {
+            const files = fs.readdirSync(DOWNLOAD_DIR);
+            for (const f of files) {
+                if (f.startsWith(timestamp)) {
+                    fs.unlinkSync(path.join(DOWNLOAD_DIR, f));
+                }
+            }
+        } catch (e) {}
+
+        if (err.message && err.message.includes('exceeds')) {
+            throw err;
+        }
+        return null;
+    }
+}
+
 /**
  * Timeout wrapper to prevent runaway download processes from hanging indefinitely.
  */
@@ -123,6 +311,7 @@ export async function cleanOldDownloads(): Promise<void> {
         const now = Date.now();
         const files = await fs.promises.readdir(DOWNLOAD_DIR);
         for (const file of files) {
+            if (file === '.gitkeep') continue;
             const filePath = path.join(DOWNLOAD_DIR, file);
             try {
                 const stat = await fs.promises.stat(filePath);
@@ -152,6 +341,23 @@ export async function downloadMedia(url: string): Promise<string | null> {
 
     const safeUrl = check.sanitizedUrl;
     logger.info('DOWNLOADER', `Attempting media download for URL: ${safeUrl}`);
+
+    // Fast-path for TikTok / Douyin
+    if (isTikTokOrDouyin(safeUrl)) {
+        try {
+            const directFile = await downloadTikTokDirect(safeUrl, true);
+            if (directFile) {
+                return directFile;
+            }
+            logger.info('DOWNLOADER', `TikWM returned null, falling back to yt-dlp for TikTok URL: ${safeUrl}`);
+        } catch (error: any) {
+            if (error.message && error.message.includes('exceeds')) {
+                throw error;
+            }
+            logger.warn('DOWNLOADER', `Direct TikTok download error (${error.message}), falling back to yt-dlp`);
+        }
+    }
+
     const timestamp = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
 
     try {
@@ -187,8 +393,9 @@ export async function downloadMedia(url: string): Promise<string | null> {
             dlpOptions.mergeOutputFormat = 'mp4';
         }
 
-        // Enforce 75s process timeout
-        await withTimeout(ytDlp(safeUrl, dlpOptions), 75000);
+        // Use smart binary runner (supports standalone Linux binary)
+        const runner = await getYtDlpRunner();
+        await withTimeout(runner(safeUrl, dlpOptions), 75000);
 
         // Find the downloaded file (ignore temporary .part or .ytdl files)
         const files = fs.readdirSync(DOWNLOAD_DIR);
@@ -229,6 +436,23 @@ export async function downloadAudio(url: string): Promise<string | null> {
 
     const safeUrl = check.sanitizedUrl;
     logger.info('DOWNLOADER', `Attempting MP3 audio extraction for URL: ${safeUrl}`);
+
+    // Fast-path for TikTok / Douyin
+    if (isTikTokOrDouyin(safeUrl)) {
+        try {
+            const directFile = await downloadTikTokDirect(safeUrl, false);
+            if (directFile) {
+                return directFile;
+            }
+            logger.info('DOWNLOADER', `TikWM audio returned null, falling back to yt-dlp for TikTok URL: ${safeUrl}`);
+        } catch (error: any) {
+            if (error.message && error.message.includes('exceeds')) {
+                throw error;
+            }
+            logger.warn('DOWNLOADER', `Direct TikTok audio error (${error.message}), falling back to yt-dlp`);
+        }
+    }
+
     const timestamp = `${Date.now()}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
 
     try {
@@ -253,8 +477,9 @@ export async function downloadAudio(url: string): Promise<string | null> {
             dlpOptions.ffmpegLocation = ffmpegPath;
         }
 
-        // Enforce 75s process timeout
-        await withTimeout(ytDlp(safeUrl, dlpOptions), 75000);
+        // Use smart binary runner (supports standalone Linux binary)
+        const runner = await getYtDlpRunner();
+        await withTimeout(runner(safeUrl, dlpOptions), 75000);
 
         const files = fs.readdirSync(DOWNLOAD_DIR);
         const downloadedFile = files.find(f => 

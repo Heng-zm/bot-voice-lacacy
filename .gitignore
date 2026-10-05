@@ -31,3 +31,6 @@ Thumbs.db
 deploy.zip
 *.rar
 deploy.sftp
+
+# Standalone platform binaries
+bin/
