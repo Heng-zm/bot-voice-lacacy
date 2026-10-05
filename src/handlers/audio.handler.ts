@@ -85,7 +85,8 @@ export function getTTSSpeedPickerKeyboard(token: string, isKm = true, currentSpe
         .text(s125, `tts_s:1.25x:${token}`)
         .text(s150, `tts_s:1.5x:${token}`)
         .row()
-        .text(isKm ? '🔙 ត្រឡប់ក្រោយ' : '🔙 Back', `tts_back:${token}`);
+        .text(isKm ? '🔙 ត្រឡប់ក្រោយ' : '🔙 Back', `tts_back:${token}`)
+        .danger();
 }
 
 /**
@@ -105,7 +106,8 @@ export function getTTSLanguagePickerKeyboard(token: string, isKm: boolean): Inli
         .text('🇯🇵 日本語 (Japanese)', `tts_l:ja:${token}`).text('🇮🇳 हिन्दी (Hindi)', `tts_l:hi:${token}`).row()
         .text('🇲🇾 Melayu', `tts_l:ms:${token}`).text('🇮🇩 Indonesia', `tts_l:id:${token}`).row()
         .text('🇵🇭 Filipino', `tts_l:fil:${token}`).text('🇸🇦 العربية (Arabic)', `tts_l:ar:${token}`).row()
-        .text(isKm ? '🔙 ត្រឡប់ក្រោយ' : '🔙 Back', `tts_back:${token}`);
+        .text(isKm ? '🔙 ត្រឡប់ក្រោយ' : '🔙 Back', `tts_back:${token}`)
+        .danger();
 }
 
 const downloadFile = (url: string, dest: string): Promise<void> => {

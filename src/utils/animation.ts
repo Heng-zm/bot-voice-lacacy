@@ -210,7 +210,8 @@ export function getComponentStatusReport(userId?: number, customPing?: number) {
 
     const keyboard = new InlineKeyboard()
         .text(isKm ? '🔄 ធ្វើបច្ចុប្បន្នភាព (Refresh)' : '🔄 Refresh Status', 'status_refresh')
-        .text(isKm ? '🔙 ត្រឡប់ក្រោយ (Back)' : '🔙 Back', 'back_main');
+        .text(isKm ? '🔙 ត្រឡប់ក្រោយ (Back)' : '🔙 Back', 'back_main')
+        .danger();
 
     return { text, keyboard };
 }

@@ -56,6 +56,7 @@ export const getSubmenuBackKeyboard = (userId?: number) => {
     const t = getTranslation(userId);
     return new Keyboard()
         .text(t.btn_back)
+        .danger()
         .resized();
 };
 
