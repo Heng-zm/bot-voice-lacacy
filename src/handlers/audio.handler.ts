@@ -63,29 +63,17 @@ export function getTTSCaption(lang: SupportedTTSLanguage, gender: VoiceGender, i
 }
 
 /**
- * Main action keyboard for voice note: Male / Female toggle, Language picker, and Delete button
+ * Main action keyboard for voice note: returns undefined to keep chat clean without extra buttons
  */
-export function getTTSVoiceKeyboard(token: string, currentLang: SupportedTTSLanguage, isKm: boolean): InlineKeyboard {
-    const maleLabel = isKm ? '👨 សំឡេង ប្រុស' : '👨 Male Voice';
-    const femaleLabel = isKm ? '👩 សំឡេង ស្រី' : '👩 Female Voice';
-    const langLabel = isKm ? '🌐 ប្តូរភាសា (10 Languages)' : '🌐 Change Language (10 Languages)';
-    const delLabel = isKm ? '🗑️ លុប' : '🗑️ Delete';
-
-    return new InlineKeyboard()
-        .text(maleLabel, `tts_v:male:${token}`)
-        .text(femaleLabel, `tts_v:female:${token}`)
-        .row()
-        .text(langLabel, `tts_langs:${token}`)
-        .text(delLabel, 'delete_this_msg');
+export function getTTSVoiceKeyboard(token: string, currentLang: SupportedTTSLanguage, isKm: boolean): InlineKeyboard | undefined {
+    return undefined;
 }
 
 /**
- * 1-Tap Action keyboard for AI chat responses: Listen via Neural TTS or Delete
+ * 1-Tap Action keyboard for AI chat responses: returns undefined to keep AI chat clean without extra buttons
  */
-export function getAiResponseKeyboard(isKm: boolean): InlineKeyboard {
-    return new InlineKeyboard()
-        .text(isKm ? '🔊 ស្តាប់ជាសំឡេង (Read Aloud)' : '🔊 Read Aloud', 'do_tts_auto')
-        .text(isKm ? '🗑️ លុប (Delete)' : '🗑️ Delete', 'delete_this_msg');
+export function getAiResponseKeyboard(isKm: boolean): InlineKeyboard | undefined {
+    return undefined;
 }
 
 /**
@@ -811,17 +799,12 @@ audioHandler.on(':voice', async (ctx) => {
 
         const formattedReply = formatTelegramHtml(reply);
 
-        const voiceReplyKeyboard = new InlineKeyboard()
-            .text(isKm ? '🔊 ស្តាប់ចម្លើយ (Read Reply)' : '🔊 Read Reply', 'voice_reply_auto')
-            .text(isKm ? '🗑️ លុប (Delete)' : '🗑️ Delete', 'delete_this_msg');
-
         await ctx.api.editMessageText(
             ctx.chat.id,
             processingMsg.message_id,
             `✨ <b>[ ▰▰▰▰▰ 100% ]</b>\n\n${t.voice_transcription}\n<i>"${escapeHtml(transcription)}"</i>\n\n${t.voice_response}\n${formattedReply}`,
             {
-                parse_mode: 'HTML',
-                reply_markup: voiceReplyKeyboard
+                parse_mode: 'HTML'
             }
         );
 

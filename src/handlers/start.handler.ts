@@ -505,19 +505,9 @@ startHandler.hears(['🔊 បំប្លែងសំឡេង TTS', '🔊 Text 
         }
     } catch (e) {}
 
-    const ttsMenu = new InlineKeyboard()
-        .text(isKm ? '🗣️ ជ្រើសរើសសំឡេង (10 ភាសា)' : '🗣️ Choose Voice (10 Languages)', 'set_voice')
-        .text(t.settings_btn_gender(currentGender), 'tts_toggle_gender')
-        .row()
-        .text('🇰🇭 សាកល្បងសំឡេងខ្មែរ', 'tts_sample:km')
-        .text('🇺🇸 Try English Voice', 'tts_sample:en');
-
     await ctx.reply(t.tts_title, {
         parse_mode: 'HTML',
         reply_markup: getSubmenuBackKeyboard(userId)
-    });
-    await ctx.reply(isKm ? '👇 ជ្រើសរើសសំឡេង ឬសាកល្បងស្តាប់គំរូសំឡេង Studio ខាងក្រោម៖' : '👇 Select voice preferences or test Studio sample voice below:', {
-        reply_markup: ttsMenu
     });
 });
 
