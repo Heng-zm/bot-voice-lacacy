@@ -29,3 +29,4 @@ Thumbs.db
 .idea/
 .claude/
 deploy.zip
+deploy.sftp
