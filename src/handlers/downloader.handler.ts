@@ -43,8 +43,20 @@ setInterval(() => {
     }
 }, 5 * 60 * 1000);
 
-const sendDownloaderGuide = async (ctx: any) => {
+export const sendDownloaderGuide = async (ctx: any) => {
     const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+
+    const isEnabled = await isFeatureEnabled('downloader');
+    if (!isEnabled) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារទាញយកវីដេអូត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Media Downloader is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
+
     const t = getTranslation(userId);
     
     // Clean up user's trigger message if possible
@@ -84,16 +96,14 @@ downloaderHandler.hears(urlRegex, async (ctx) => {
     const url = rawUrl.replace(/[),.!?>;:]+$/, '');
     const userMsgId = ctx.message?.message_id;
 
-    if (userId && !config.ADMIN_IDS.includes(userId)) {
-        const isEnabled = await isFeatureEnabled('downloader');
-        if (!isEnabled) {
-            return ctx.reply(
-                isKm
-                    ? '⚠️ <b>មុខងារទាញយកវីដេអូត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
-                    : '⚠️ <b>Media Downloader is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
-                { parse_mode: 'HTML' }
-            );
-        }
+    const isEnabled = await isFeatureEnabled('downloader');
+    if (!isEnabled) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារទាញយកវីដេអូត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Media Downloader is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
     }
 
     if (userId && isUserDownloading(userId)) {

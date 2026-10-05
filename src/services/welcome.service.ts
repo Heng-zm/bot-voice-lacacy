@@ -90,14 +90,48 @@ export async function resetCustomWelcome(): Promise<void> {
     }
 }
 
-export function getDefaultWelcomeCaption(): string {
+import { FeatureKey, isFeatureEnabledSync } from './features.service';
+
+export function buildFeaturesBulletList(features?: Partial<Record<FeatureKey, boolean>>, isKm = true): string {
+    const isFeatActive = (key: FeatureKey) => {
+        if (features && features[key] !== undefined) return !!features[key];
+        return isFeatureEnabledSync(key);
+    };
+
+    const lines: string[] = [];
+    if (isFeatActive('chat')) {
+        lines.push(isKm 
+            ? '• 🤖 <b>AI Chat៖</b> សួរ សរសេរ និងទទួលជំនួយដោយ Gemini 3.6 Flash' 
+            : '• 🤖 <b>AI Chat:</b> Ask questions, chat and get assistance powered by Gemini 3.6 Flash');
+    }
+    if (isFeatActive('tts')) {
+        lines.push(isKm 
+            ? '• 🔊 <b>Text-to-Speech៖</b> បម្លែងអត្ថបទជាសំឡេង ១០ ភាសា (Studio HD 96k)' 
+            : '• 🔊 <b>Text-to-Speech:</b> Convert text to neural speech in 10 languages (Studio HD 96k)');
+    }
+    if (isFeatActive('vision')) {
+        lines.push(isKm 
+            ? '• 📸 <b>Vision OCR៖</b> ស្រង់អក្សរពីរូបភាព & បកប្រែជាភាសាខ្មែរ' 
+            : '• 📸 <b>Vision OCR:</b> Extract text from photos & translate to Khmer');
+    }
+    if (isFeatActive('tempmail')) {
+        lines.push(isKm 
+            ? '• 📧 <b>Temp Mail៖</b> ទទួលអ៊ីមែល និង OTP ជូនដំណឹងភ្លាមៗ' 
+            : '• 📧 <b>Temp Mail:</b> Disposable email inbox with instant OTP notifications');
+    }
+    if (isFeatActive('downloader')) {
+        lines.push(isKm 
+            ? '• 📥 <b>Media Downloader៖</b> ទាញយកពី TikTok, YouTube, Instagram និង Facebook' 
+            : '• 📥 <b>Media Downloader:</b> Download videos from TikTok, YouTube, Instagram and Facebook');
+    }
+    return lines.join('\n');
+}
+
+export function getDefaultWelcomeCaption(features?: Partial<Record<FeatureKey, boolean>>): string {
+    const bullets = buildFeaturesBulletList(features, true);
     return `🌟 <b>សួស្តី {name}!</b> សូមស្វាគមន៍មកកាន់ <b>@sddaDCbOT</b>!\n\n` +
            `✨ <b>មុខងាររបស់អ្នក</b>៖\n` +
-           `• 🤖 <b>AI Chat៖</b> សួរ សរសេរ និងទទួលជំនួយដោយ Gemini 3.6 Flash\n` +
-           `• 🔊 <b>Text-to-Speech៖</b> បម្លែងអត្ថបទជាសំឡេង ១០ ភាសា (Studio HD 96k)\n` +
-           `• 📸 <b>Vision OCR៖</b> ស្រង់អក្សរពីរូបភាព & បកប្រែជាភាសាខ្មែរ\n` +
-           `• 📧 <b>Temp Mail៖</b> ទទួលអ៊ីមែល និង OTP ជូនដំណឹងភ្លាមៗ\n` +
-           `• 📥 <b>Media Downloader៖</b> ទាញយកពី TikTok, YouTube, Instagram និង Facebook\n\n` +
+           (bullets ? `${bullets}\n\n` : '') +
            `👇 <b>ជ្រើសរើសមុខងារមួយខាងក្រោមដើម្បីចាប់ផ្តើម</b>៖`;
 }
 

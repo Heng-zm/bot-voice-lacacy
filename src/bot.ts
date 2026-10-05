@@ -13,6 +13,7 @@ import { pingSupabase, syncUserToSupabase } from './services/supabase.service';
 import { loadUserLanguage, getUserLanguage, loadUserNotificationPreference } from './utils/i18n';
 import { getTTSTextCache, TTS_LANGUAGES, loadUserVoiceGender, loadUserVoicePreference } from './services/tts.service';
 import { startHealthServer, stopHealthServer } from './services/health.service';
+import { initFeaturesService } from './services/features.service';
 
 // Process-level unhandled exception catching
 process.on('unhandledRejection', (reason: any) => {
@@ -257,6 +258,7 @@ async function startConcurrentBot() {
         logger.warn('SUPABASE', `Supabase connection issue: ${supabaseStatus.error || 'unreachable'}`);
     }
 
+    await initFeaturesService().catch((e) => logger.error('FEATURES', 'Failed to init features', e));
     logger.info('COMPONENTS', `All modular handlers (Chat, Voice, Vision OCR, Downloader, TempMail Realtime, Admin, Redis Cache, Supabase DB) active.`);
 
     try {

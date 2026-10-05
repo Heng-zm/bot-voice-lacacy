@@ -22,6 +22,7 @@ import {
     normalizeLanguageCode
 } from '../services/tts.service';
 import { setUserMode, getTTSVoiceKeyboard, getTTSCaption, getAiResponseKeyboard } from './audio.handler';
+import { isFeatureEnabled, getAllFeaturesStatus } from '../services/features.service';
 import { generateResponse } from '../services/gemini.service';
 import { sendOrEditAiResponse } from '../utils/telegram-format';
 import { saveConversationToSupabase } from '../services/supabase.service';
@@ -31,6 +32,8 @@ import {
     formatWelcomeCaption,
     getDefaultWelcomeCaption
 } from '../services/welcome.service';
+import { sendTempMailView } from './tempmail.handler';
+import { sendDownloaderGuide } from './downloader.handler';
 import fs from 'fs';
 import path from 'path';
 
@@ -40,15 +43,77 @@ function escapeHtml(text: string): string {
     return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Main Menu: Show feature buttons + Donation (Back button is hidden)
-export const getMainMenuKeyboard = (userId?: number) => {
+// Main Menu: Show ONLY enabled feature buttons + Donation (Disabled features are hidden/removed)
+export const getMainMenuKeyboard = async (userId?: number): Promise<Keyboard> => {
     const t = getTranslation(userId);
-    return new Keyboard()
-        .text(t.menu_ai_chat).text(t.menu_tts).row()
-        .text(t.menu_vision).text(t.menu_mail).row()
-        .text(t.menu_dl).text(t.menu_donation).row()
-        .text(t.menu_settings).text(t.menu_help)
-        .resized();
+    const kb = new Keyboard();
+
+    const [chatOk, ttsOk, visionOk, mailOk, dlOk] = await Promise.all([
+        isFeatureEnabled('chat'),
+        isFeatureEnabled('tts'),
+        isFeatureEnabled('vision'),
+        isFeatureEnabled('tempmail'),
+        isFeatureEnabled('downloader')
+    ]);
+
+    const featureButtons: string[] = [];
+    if (chatOk) featureButtons.push(t.menu_ai_chat);
+    if (ttsOk) featureButtons.push(t.menu_tts);
+    if (visionOk) featureButtons.push(t.menu_vision);
+    if (mailOk) featureButtons.push(t.menu_mail);
+    if (dlOk) featureButtons.push(t.menu_dl);
+    featureButtons.push(t.menu_donation);
+
+    for (let i = 0; i < featureButtons.length; i += 2) {
+        if (i + 1 < featureButtons.length) {
+            kb.text(featureButtons[i]).text(featureButtons[i + 1]).row();
+        } else {
+            kb.text(featureButtons[i]).row();
+        }
+    }
+
+    kb.text(t.menu_settings).text(t.menu_help).resized();
+    return kb;
+};
+
+// Inline Main Menu: Show ONLY enabled feature buttons as Inline Buttons (Disabled features are hidden/removed)
+export const getMainMenuInlineKeyboard = async (userId?: number): Promise<InlineKeyboard> => {
+    const t = getTranslation(userId);
+    const isKm = getUserLanguage(userId) === 'km';
+    const kb = new InlineKeyboard();
+
+    const [chatOk, ttsOk, visionOk, mailOk, dlOk] = await Promise.all([
+        isFeatureEnabled('chat'),
+        isFeatureEnabled('tts'),
+        isFeatureEnabled('vision'),
+        isFeatureEnabled('tempmail'),
+        isFeatureEnabled('downloader')
+    ]);
+
+    const activeButtons: Array<{ text: string; data: string }> = [];
+    if (chatOk) activeButtons.push({ text: t.menu_ai_chat, data: 'menu_feat:chat' });
+    if (ttsOk) activeButtons.push({ text: t.menu_tts, data: 'menu_feat:tts' });
+    if (visionOk) activeButtons.push({ text: t.menu_vision, data: 'menu_feat:vision' });
+    if (mailOk) activeButtons.push({ text: t.menu_mail, data: 'menu_feat:tempmail' });
+    if (dlOk) activeButtons.push({ text: t.menu_dl, data: 'menu_feat:downloader' });
+    activeButtons.push({ text: t.menu_donation, data: 'menu_feat:donation' });
+
+    for (let i = 0; i < activeButtons.length; i += 2) {
+        if (i + 1 < activeButtons.length) {
+            kb.text(activeButtons[i].text, activeButtons[i].data)
+              .text(activeButtons[i + 1].text, activeButtons[i + 1].data)
+              .row();
+        } else {
+            kb.text(activeButtons[i].text, activeButtons[i].data).row();
+        }
+    }
+
+    kb.text(t.menu_settings, 'menu_feat:settings')
+      .text(t.menu_help, 'menu_feat:help')
+      .row()
+      .text(isKm ? '⚡ ស្ថានភាពមុខងារ' : '⚡ Component Status', 'view_status');
+
+    return kb;
 };
 
 // Submenu: Show ONLY the red < Back button (Feature buttons are hidden)
@@ -60,7 +125,7 @@ export const getSubmenuBackKeyboard = (userId?: number) => {
         .resized();
 };
 
-startHandler.command('start', async (ctx) => {
+startHandler.command(['start', 'menu'], async (ctx) => {
     const userId = ctx.from?.id;
     const match = ctx.match?.trim();
 
@@ -88,9 +153,17 @@ startHandler.command('start', async (ctx) => {
                     // Also send main menu below it so friend can use the bot
                     const t = getTranslation(userId);
                     const firstName = ctx.from?.first_name || (isKm ? 'មិត្តភក្តិ' : 'friend');
-                    await ctx.reply(t.welcome(escapeHtml(firstName)), {
+                    const [statuses, inlineKb, replyKb] = await Promise.all([
+                        getAllFeaturesStatus(),
+                        getMainMenuInlineKeyboard(userId),
+                        getMainMenuKeyboard(userId)
+                    ]);
+                    await ctx.reply(t.welcome(escapeHtml(firstName), statuses), {
                         parse_mode: 'HTML',
-                        reply_markup: getMainMenuKeyboard(userId)
+                        reply_markup: inlineKb
+                    });
+                    await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
+                        reply_markup: replyKb
                     });
                     return;
                 } catch (e) {
@@ -114,14 +187,28 @@ startHandler.command('start', async (ctx) => {
 
                 const t = getTranslation(userId);
                 const firstName = ctx.from?.first_name || (isKm ? 'មិត្តភក្តិ' : 'friend');
-                await ctx.reply(t.welcome(escapeHtml(firstName)), {
+                const [statuses, inlineKb, replyKb] = await Promise.all([
+                    getAllFeaturesStatus(),
+                    getMainMenuInlineKeyboard(userId),
+                    getMainMenuKeyboard(userId)
+                ]);
+                await ctx.reply(t.welcome(escapeHtml(firstName), statuses), {
                     parse_mode: 'HTML',
-                    reply_markup: getMainMenuKeyboard(userId)
+                    reply_markup: inlineKb
+                });
+                await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
+                    reply_markup: replyKb
                 });
                 return;
             }
         }
     }
+
+    const [statuses, inlineKb, replyKb] = await Promise.all([
+        getAllFeaturesStatus(),
+        getMainMenuInlineKeyboard(userId),
+        getMainMenuKeyboard(userId)
+    ]);
 
     // Check if custom welcome message (photo with caption) is enabled by admin
     const customWelcome = await getCustomWelcomeConfig();
@@ -129,7 +216,7 @@ startHandler.command('start', async (ctx) => {
     const firstName = ctx.from?.first_name || (isKm ? 'មិត្តភក្តិ' : 'friend');
 
     if (customWelcome.enabled) {
-        const rawCaption = customWelcome.caption || getDefaultWelcomeCaption();
+        const rawCaption = customWelcome.caption || getDefaultWelcomeCaption(statuses);
         const formattedCaption = formatWelcomeCaption(rawCaption, {
             firstName: escapeHtml(firstName),
             username: ctx.from?.username ? escapeHtml(ctx.from.username) : undefined,
@@ -141,7 +228,10 @@ startHandler.command('start', async (ctx) => {
                 await ctx.replyWithPhoto(customWelcome.photoFileId, {
                     caption: formattedCaption,
                     parse_mode: 'HTML',
-                    reply_markup: getMainMenuKeyboard(userId)
+                    reply_markup: inlineKb
+                });
+                await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
+                    reply_markup: replyKb
                 });
                 return;
             } catch (err) {
@@ -152,22 +242,28 @@ startHandler.command('start', async (ctx) => {
         try {
             await ctx.reply(formattedCaption, {
                 parse_mode: 'HTML',
-                reply_markup: getMainMenuKeyboard(userId)
+                reply_markup: inlineKb
+            });
+            await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
+                reply_markup: replyKb
             });
         } catch (textErr) {
             logger.warn('START_CUSTOM_WELCOME', 'HTML parse error in custom welcome, fallback to plain text', textErr);
             await ctx.reply(customWelcome.caption || 'Welcome!', {
-                reply_markup: getMainMenuKeyboard(userId)
+                reply_markup: inlineKb
             });
         }
         return;
     }
 
-    // Default system welcome start handler
+    // Default system welcome start handler with Dynamic Inline & Reply Keyboards
     const t = getTranslation(userId);
-    await ctx.reply(t.welcome(escapeHtml(firstName)), { 
+    await ctx.reply(t.welcome(escapeHtml(firstName), statuses), { 
         parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard(userId) 
+        reply_markup: inlineKb 
+    });
+    await ctx.reply(isKm ? '👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖' : '👇 Choose a feature above or use keyboard below:', {
+        reply_markup: replyKb
     });
 });
 
@@ -199,9 +295,14 @@ startHandler.hears(backButtonAliases, async (ctx) => {
         }
     } catch (e) {}
 
+    const [inlineKb, replyKb] = await Promise.all([
+        getMainMenuInlineKeyboard(userId),
+        getMainMenuKeyboard(userId)
+    ]);
+
     await ctx.reply(t.returned_main, {
         parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard(userId)
+        reply_markup: inlineKb
     });
 });
 
@@ -210,10 +311,153 @@ startHandler.callbackQuery(['back_main', 'main_menu'], async (ctx) => {
     if (userId) setUserMode(userId, 'chat');
     const t = getTranslation(userId);
     await ctx.answerCallbackQuery();
-    await ctx.reply(t.returned_main, {
+
+    const [inlineKb, replyKb] = await Promise.all([
+        getMainMenuInlineKeyboard(userId),
+        getMainMenuKeyboard(userId)
+    ]);
+
+    try {
+        await ctx.editMessageText(t.returned_main, {
+            parse_mode: 'HTML',
+            reply_markup: inlineKb
+        });
+    } catch (e) {
+        await ctx.reply(t.returned_main, {
+            parse_mode: 'HTML',
+            reply_markup: inlineKb
+        });
+    }
+});
+
+// ==========================================
+// MAIN MENU INLINE FEATURE BUTTON CALLBACKS
+// ==========================================
+
+startHandler.callbackQuery('menu_feat:chat', async (ctx) => {
+    const isEnabled = await isFeatureEnabled('chat');
+    const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!isEnabled) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារសន្ទនា AI ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ AI Chat module is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
+    const userId = ctx.from?.id;
+    if (userId) setUserMode(userId, 'chat');
+    const t = getTranslation(userId);
+    await ctx.reply(t.ai_chat_title, {
         parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard(userId)
+        reply_markup: getSubmenuBackKeyboard(userId)
     });
+});
+
+startHandler.callbackQuery('menu_feat:tts', async (ctx) => {
+    const isEnabled = await isFeatureEnabled('tts');
+    const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!isEnabled) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារបំប្លែងសំឡេង TTS ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Neural TTS module is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
+    const userId = ctx.from?.id;
+    if (userId) setUserMode(userId, 'tts');
+    const t = getTranslation(userId);
+    await ctx.reply(t.tts_title, {
+        parse_mode: 'HTML',
+        reply_markup: getSubmenuBackKeyboard(userId)
+    });
+});
+
+startHandler.callbackQuery('menu_feat:vision', async (ctx) => {
+    const isEnabled = await isFeatureEnabled('vision');
+    const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!isEnabled) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Vision OCR module is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
+    const userId = ctx.from?.id;
+    const t = getTranslation(userId);
+    await ctx.reply(t.vision_info, {
+        parse_mode: 'HTML',
+        reply_markup: getSubmenuBackKeyboard(userId)
+    });
+});
+
+startHandler.callbackQuery('menu_feat:tempmail', async (ctx) => {
+    const isEnabled = await isFeatureEnabled('tempmail');
+    const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!isEnabled) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារអ៊ីមែលបណ្តោះអាសន្នត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ TempMail module is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
+    await sendTempMailView(ctx);
+});
+
+startHandler.callbackQuery('menu_feat:downloader', async (ctx) => {
+    const isEnabled = await isFeatureEnabled('downloader');
+    const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!isEnabled) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារទាញយកវីដេអូត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Media Downloader is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
+    await sendDownloaderGuide(ctx);
+});
+
+startHandler.callbackQuery('menu_feat:donation', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleDonation(ctx);
+});
+
+export const sendSettingsMenu = async (ctx: any) => {
+    const userId = ctx.from?.id;
+    const t = getTranslation(userId);
+    const isKm = getUserLanguage(userId) === 'km';
+
+    try {
+        if (ctx.message?.message_id && !ctx.callbackQuery) {
+            await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        }
+    } catch (e) {}
+
+    const notifOn = getUserNotificationPreference(userId);
+    const gender = getUserVoiceGender(userId);
+    const settingsMenu = new InlineKeyboard()
+        .text(t.settings_btn_voice, 'set_voice')
+        .text(t.settings_btn_gender(gender), 'set_gender').row()
+        .text(t.settings_btn_lang, 'set_lang')
+        .text(t.settings_btn_notif(notifOn), 'set_notif').row()
+        .text(t.settings_btn_status, 'view_status');
+        
+    await ctx.reply(t.settings_title, {
+        parse_mode: 'HTML',
+        reply_markup: getSubmenuBackKeyboard(userId)
+    });
+    await ctx.reply(isKm ? '👇 ជ្រើសរើសការកំណត់ខាងក្រោម៖' : '👇 Choose settings below:', {
+        reply_markup: settingsMenu
+    });
+};
+
+startHandler.callbackQuery('menu_feat:settings', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await sendSettingsMenu(ctx);
+});
+
+startHandler.callbackQuery('menu_feat:help', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await sendHelpGuide(ctx);
 });
 
 // Universal callback query to delete any temporary / result message
@@ -319,31 +563,72 @@ const sendHelpGuide = async (ctx: any) => {
     const userId = ctx.from?.id;
     const isKm = getUserLanguage(userId) === 'km';
 
-    const guideKeyboard = new InlineKeyboard()
-        .text(isKm ? '🗣️ ណែនាំអំពីសំឡេង' : '🗣️ Voice Guide', 'guide_voice')
-        .text(isKm ? '📸 ណែនាំស្កេន OCR' : '📸 Vision Guide', 'guide_vision').row()
-        .text(isKm ? '📧 ណែនាំអ៊ីមែល' : '📧 Temp Mail Guide', 'guide_mail')
-        .text(isKm ? '📥 ណែនាំទាញយក' : '📥 Downloader Guide', 'guide_dl').row()
-        .text(isKm ? '⚡ ស្ថានភាពដំណើរការមុខងារ' : '⚡ Live Component Status', 'view_status');
+    const [chatOk, ttsOk, visionOk, mailOk, dlOk] = await Promise.all([
+        isFeatureEnabled('chat'),
+        isFeatureEnabled('tts'),
+        isFeatureEnabled('vision'),
+        isFeatureEnabled('tempmail'),
+        isFeatureEnabled('downloader')
+    ]);
 
-    const helpText = isKm ?
-        `💡 <b>មគ្គុទ្ទេសក៍ & របៀបប្រើប្រាស់មុខងារទាំងអស់</b>\n\n` +
-        `១️⃣ <b>សន្ទនាសំឡេង & AI៖</b> សរសេរសំណួរណាមួយមក នោះ AI នឹងឆ្លើយ។ ចុច <b>🔊 ស្តាប់ជាភាសាខ្មែរ</b> ដើម្បីស្តាប់ការអានជាសំឡេងធម្មជាតិ។\n` +
-        `២️⃣ <b>សារសំឡេង (Voice Note)៖</b> ផ្ញើសារសំឡេងជាភាសាខ្មែរ ឬអង់គ្លេស AI នឹងស្តាប់ សរសេរជាអក្សរ និងឆ្លើយតបវិញ។\n` +
-        `៣️⃣ <b>ស្កេនអក្សរ OCR៖</b> ផ្ញើរូបភាពដើម្បីស្រង់អក្សរ និងបកប្រែជាភាសាខ្មែរ។\n` +
-        `៤️⃣ <b>អ៊ីមែលបណ្តោះអាសន្ន៖</b> ទទួលលេខកូដ OTP ភ្លាមៗដោយស្វ័យប្រវត្ត (Realtime)។\n` +
-        `៥️⃣ <b>ទាញយកវីដេអូ៖</b> ផ្ញើតំណភ្ជាប់ពី TikTok, YouTube, Instagram, Facebook ដើម្បីទទួលបានវីដេអូច្បាស់ល្អ។\n` +
-        `៦️⃣ <b>ការឧបត្ថម្ភ (Donation)៖</b> ចុចប៊ូតុងឧបត្ថម្ភដើម្បីស្កេន KHQR និងគាំទ្រដល់ @sddaDCbOT។\n\n` +
-        `👇 ចុចលើប៊ូតុងខាងក្រោមសម្រាប់ព័ត៌មានលម្អិតបន្ថែម៖`
-        :
-        `💡 <b>Bot Components & Usage Guide</b>\n\n` +
-        `1️⃣ <b>Chat & Voice:</b> Send any question to chat with AI. Tap <b>🔊 Read</b> to hear it spoken in Khmer or English.\n` +
-        `2️⃣ <b>Audio Messages:</b> Send a Telegram voice note and the bot will transcribe and answer you.\n` +
-        `3️⃣ <b>Photo OCR:</b> Send photos/documents to read text and translate it to Khmer.\n` +
-        `4️⃣ <b>Temp Mail:</b> Generates disposable email addresses with instant real-time push alerts.\n` +
-        `5️⃣ <b>Downloader:</b> Simply send video links from TikTok, YouTube, Instagram, or Facebook.\n` +
-        `6️⃣ <b>Donation:</b> Tap Donation button to scan KHQR and support @sddaDCbOT.\n\n` +
-        `Tap a guide below for in-depth details:`;
+    const guideKeyboard = new InlineKeyboard();
+    const guideItems: Array<{ text: string; data: string }> = [];
+
+    if (chatOk || ttsOk) {
+        guideItems.push({ text: isKm ? '🗣️ ណែនាំអំពីសំឡេង' : '🗣️ Voice Guide', data: 'guide_voice' });
+    }
+    if (visionOk) {
+        guideItems.push({ text: isKm ? '📸 ណែនាំស្កេន OCR' : '📸 Vision Guide', data: 'guide_vision' });
+    }
+    if (mailOk) {
+        guideItems.push({ text: isKm ? '📧 ណែនាំអ៊ីមែល' : '📧 Temp Mail Guide', data: 'guide_mail' });
+    }
+    if (dlOk) {
+        guideItems.push({ text: isKm ? '📥 ណែនាំទាញយក' : '📥 Downloader Guide', data: 'guide_dl' });
+    }
+
+    for (let i = 0; i < guideItems.length; i += 2) {
+        if (i + 1 < guideItems.length) {
+            guideKeyboard.text(guideItems[i].text, guideItems[i].data).text(guideItems[i + 1].text, guideItems[i + 1].data).row();
+        } else {
+            guideKeyboard.text(guideItems[i].text, guideItems[i].data).row();
+        }
+    }
+    guideKeyboard.text(isKm ? '⚡ ស្ថានភាពដំណើរការមុខងារ' : '⚡ Live Component Status', 'view_status');
+
+    const helpLines: string[] = [];
+    let idx = 1;
+    if (chatOk || ttsOk) {
+        helpLines.push(isKm
+            ? `${idx++}️⃣ <b>សន្ទនាសំឡេង & AI៖</b> សរសេរសំណួរណាមួយមក នោះ AI នឹងឆ្លើយ។ ចុច <b>🔊 ស្តាប់ជាភាសាខ្មែរ</b> ដើម្បីស្តាប់ការអានជាសំឡេងធម្មជាតិ។`
+            : `${idx++}️⃣ <b>Chat & Voice:</b> Send any question to chat with AI. Tap <b>🔊 Read</b> to hear it spoken in Khmer or English.`);
+        helpLines.push(isKm
+            ? `${idx++}️⃣ <b>សារសំឡេង (Voice Note)៖</b> ផ្ញើសារសំឡេងជាភាសាខ្មែរ ឬអង់គ្លេស AI នឹងស្តាប់ សរសេរជាអក្សរ និងឆ្លើយតបវិញ។`
+            : `${idx++}️⃣ <b>Audio Messages:</b> Send a Telegram voice note and the bot will transcribe and answer you.`);
+    }
+    if (visionOk) {
+        helpLines.push(isKm
+            ? `${idx++}️⃣ <b>ស្កេនអក្សរ OCR៖</b> ផ្ញើរូបភាពដើម្បីស្រង់អក្សរ និងបកប្រែជាភាសាខ្មែរ។`
+            : `${idx++}️⃣ <b>Photo OCR:</b> Send photos/documents to read text and translate it to Khmer.`);
+    }
+    if (mailOk) {
+        helpLines.push(isKm
+            ? `${idx++}️⃣ <b>អ៊ីមែលបណ្តោះអាសន្ន៖</b> ទទួលលេខកូដ OTP ភ្លាមៗដោយស្វ័យប្រវត្ត (Realtime)។`
+            : `${idx++}️⃣ <b>Temp Mail:</b> Generates disposable email addresses with instant real-time push alerts.`);
+    }
+    if (dlOk) {
+        helpLines.push(isKm
+            ? `${idx++}️⃣ <b>ទាញយកវីដេអូ៖</b> ផ្ញើតំណភ្ជាប់ពី TikTok, YouTube, Instagram, Facebook ដើម្បីទទួលបានវីដេអូច្បាស់ល្អ។`
+            : `${idx++}️⃣ <b>Downloader:</b> Simply send video links from TikTok, YouTube, Instagram, or Facebook.`);
+    }
+    helpLines.push(isKm
+        ? `${idx++}️⃣ <b>ការឧបត្ថម្ភ (Donation)៖</b> ចុចប៊ូតុងឧបត្ថម្ភដើម្បីស្កេន KHQR និងគាំទ្រដល់ @sddaDCbOT។`
+        : `${idx++}️⃣ <b>Donation:</b> Tap Donation button to scan KHQR and support @sddaDCbOT.`);
+
+    const helpBody = helpLines.join('\n');
+    const helpText = isKm
+        ? `💡 <b>មគ្គុទ្ទេសក៍ & របៀបប្រើប្រាស់មុខងារទាំងអស់</b>\n\n${helpBody}\n\n👇 ចុចលើប៊ូតុងខាងក្រោមសម្រាប់ព័ត៌មានលម្អិតបន្ថែម៖`
+        : `💡 <b>Bot Components & Usage Guide</b>\n\n${helpBody}\n\nTap a guide below for in-depth details:`;
 
     await ctx.reply(helpText, {
         parse_mode: 'HTML',
@@ -360,7 +645,8 @@ startHandler.hears(['💡 ជំនួយ & ណែនាំ', '💡 Help & Guide
 // Live Component Status Feature
 const sendComponentStatus = async (ctx: any) => {
     const userId = ctx.from?.id;
-    const { text, keyboard } = getComponentStatusReport(userId);
+    const features = await getAllFeaturesStatus();
+    const { text, keyboard } = getComponentStatusReport(userId, undefined, features);
     await ctx.reply(text, {
         parse_mode: 'HTML',
         reply_markup: keyboard
@@ -373,7 +659,8 @@ startHandler.hears(['⚡ ស្ថានភាពមុខងារ', '⚡ Compo
 startHandler.callbackQuery('view_status', async (ctx) => {
     await ctx.answerCallbackQuery();
     const userId = ctx.from?.id;
-    const { text, keyboard } = getComponentStatusReport(userId);
+    const features = await getAllFeaturesStatus();
+    const { text, keyboard } = getComponentStatusReport(userId, undefined, features);
     await ctx.reply(text, {
         parse_mode: 'HTML',
         reply_markup: keyboard
@@ -384,7 +671,8 @@ startHandler.callbackQuery('status_refresh', async (ctx) => {
     const userId = ctx.from?.id;
     const isKm = getUserLanguage(userId) === 'km';
     await ctx.answerCallbackQuery({ text: isKm ? 'កំពុងធ្វើបច្ចុប្បន្នភាពស្ថានភាព... ⚡' : 'Updating live status... ⚡' });
-    const { text, keyboard } = getComponentStatusReport(userId);
+    const features = await getAllFeaturesStatus(true);
+    const { text, keyboard } = getComponentStatusReport(userId, undefined, features);
     try {
         await ctx.editMessageText(text, {
             parse_mode: 'HTML',
@@ -395,8 +683,18 @@ startHandler.callbackQuery('status_refresh', async (ctx) => {
 
 // Guide Sub-callbacks
 startHandler.callbackQuery('guide_voice', async (ctx) => {
-    await ctx.answerCallbackQuery();
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    const [chatOk, ttsOk] = await Promise.all([
+        isFeatureEnabled('chat'),
+        isFeatureEnabled('tts')
+    ]);
+    if (!chatOk && !ttsOk) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារសំឡេង & AI ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Voice & Chat modules are temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
     const text = isKm ?
         `🗣️ <b>ការណែនាំអំពីការប្រើប្រាស់សំឡេង (Voice & TTS Studio)</b>\n\n` +
         `• <b>ការអានអត្ថបទ (Edge Neural TTS 96k)៖</b> គាំទ្រ ១០ ភាសាជាផ្លូវការ រួមមាន 🇰🇭 ខ្មែរ, 🇺🇸 អង់គ្លេស, 🇨🇳 ចិន, 🇰🇷 កូរ៉េ, 🇯🇵 ជប៉ុន, 🇮🇳 ហិណ្ឌី, 🇲🇾 ម៉ាឡេស៊ី, 🇮🇩 ឥណ្ឌូនេស៊ី, 🇵🇭 ហ្វីលីពីន, និង 🇸🇦 អារ៉ាប់។\n` +
@@ -414,8 +712,14 @@ startHandler.callbackQuery('guide_voice', async (ctx) => {
 });
 
 startHandler.callbackQuery('guide_vision', async (ctx) => {
-    await ctx.answerCallbackQuery();
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!await isFeatureEnabled('vision')) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Vision OCR is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
     const text = isKm ?
         `📸 <b>ការណែនាំអំពីការស្កេនរូបភាព (Vision OCR)</b>\n\n` +
         `• ថតរូបស្លាកសញ្ញា ឯកសារ បង្កាន់ដៃ ឬសៀវភៅ រួចផ្ញើមកកាន់ទីនេះ។\n` +
@@ -431,8 +735,14 @@ startHandler.callbackQuery('guide_vision', async (ctx) => {
 });
 
 startHandler.callbackQuery('guide_mail', async (ctx) => {
-    await ctx.answerCallbackQuery();
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!await isFeatureEnabled('tempmail')) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារអ៊ីមែលបណ្តោះអាសន្នត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Temp Mail module is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
     const text = isKm ?
         `📧 <b>ការណែនាំអំពីអ៊ីមែលបណ្តោះអាសន្ន (Temp Mail)</b>\n\n` +
         `• ចុចលើ <code>📧 អ៊ីមែលបណ្តោះអាសន្ន</code> ឬវាយ <code>/tempmail</code> ដើម្បីបង្កើតអ៊ីមែលថ្មីមួយភ្លាមៗ។\n` +
@@ -448,8 +758,14 @@ startHandler.callbackQuery('guide_mail', async (ctx) => {
 });
 
 startHandler.callbackQuery('guide_dl', async (ctx) => {
-    await ctx.answerCallbackQuery();
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
+    if (!await isFeatureEnabled('downloader')) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារទាញយកវីដេអូត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Downloader module is temporarily paused',
+            show_alert: true
+        });
+    }
+    await ctx.answerCallbackQuery();
     const text = isKm ?
         `📥 <b>ការណែនាំអំពីការទាញយកវីដេអូ (Downloader)</b>\n\n` +
         `• ចម្លងតំណភ្ជាប់ (Link) ពី TikTok (រួមទាំងតំណខ្លី vt.tiktok.com), YouTube, Instagram Reels ឬ Facebook។\n` +
@@ -467,9 +783,19 @@ startHandler.callbackQuery('guide_dl', async (ctx) => {
 // 1. AI Chat Component: switch keyboard to ONLY the red < Back button and set chat mode
 startHandler.hears(['🤖 សន្ទនា AI', '🤖 AI Chat', '🗣️ សំឡេង AI', '🗣️ Voice Chat', 'សន្ទនា AI', 'AI Chat'], async (ctx) => {
     const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+
+    if (!await isFeatureEnabled('chat')) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារសន្ទនា AI ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>AI Chat module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
+
     if (userId) setUserMode(userId, 'chat');
     const t = getTranslation(userId);
-    const isKm = getUserLanguage(userId) === 'km';
 
     try {
         if (ctx.message?.message_id) {
@@ -486,10 +812,19 @@ startHandler.hears(['🤖 សន្ទនា AI', '🤖 AI Chat', '🗣️ ស�
 // 2. Direct TTS Component: switch keyboard to ONLY the red < Back button and set TTS mode
 startHandler.hears(['🔊 បំប្លែងសំឡេង TTS', '🔊 Text to Speech', '🔊 បំប្លែងសំឡេង (TTS)', '🔊 TTS', 'បំប្លែងសំឡេង'], async (ctx) => {
     const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+
+    if (!await isFeatureEnabled('tts')) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារបំប្លែងសំឡេង TTS ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Neural TTS module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
+
     if (userId) setUserMode(userId, 'tts');
     const t = getTranslation(userId);
-    const isKm = getUserLanguage(userId) === 'km';
-    const currentGender = getUserVoiceGender(userId);
 
     try {
         if (ctx.message?.message_id) {
@@ -506,6 +841,17 @@ startHandler.hears(['🔊 បំប្លែងសំឡេង TTS', '🔊 Text 
 // Vision OCR Component: switch keyboard to ONLY the red < Back button
 startHandler.hears(['📸 ស្កេន OCR', '📸 Vision OCR', '📸 ស្កេនរូបភាព'], async (ctx) => {
     const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+
+    if (!await isFeatureEnabled('vision')) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Vision OCR module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
+
     const t = getTranslation(userId);
 
     try {
@@ -521,34 +867,8 @@ startHandler.hears(['📸 ស្កេន OCR', '📸 Vision OCR', '📸 ស្�
 });
 
 // Settings Component: switch keyboard to ONLY the red < Back button
-startHandler.hears(['⚙️ ការកំណត់', '⚙️ Settings'], async (ctx) => {
-    const userId = ctx.from?.id;
-    const t = getTranslation(userId);
-    const isKm = getUserLanguage(userId) === 'km';
-
-    try {
-        if (ctx.message?.message_id) {
-            await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
-        }
-    } catch (e) {}
-
-    const notifOn = getUserNotificationPreference(userId);
-    const gender = getUserVoiceGender(userId);
-    const settingsMenu = new InlineKeyboard()
-        .text(t.settings_btn_voice, 'set_voice')
-        .text(t.settings_btn_gender(gender), 'set_gender').row()
-        .text(t.settings_btn_lang, 'set_lang')
-        .text(t.settings_btn_notif(notifOn), 'set_notif').row()
-        .text(t.settings_btn_status, 'view_status');
-        
-    await ctx.reply(t.settings_title, {
-        parse_mode: 'HTML',
-        reply_markup: getSubmenuBackKeyboard(userId)
-    });
-    await ctx.reply(isKm ? '👇 ជ្រើសរើសការកំណត់ខាងក្រោម៖' : '👇 Choose settings below:', {
-        reply_markup: settingsMenu
-    });
-});
+startHandler.hears(['⚙️ ការកំណត់', '⚙️ Settings'], sendSettingsMenu);
+startHandler.command(['settings'], sendSettingsMenu);
 
 // Voice Chat Callbacks
 startHandler.callbackQuery('tts_khmer', async (ctx) => {
@@ -647,18 +967,20 @@ startHandler.callbackQuery('set_lang', async (ctx) => {
 startHandler.callbackQuery('lang_kh', async (ctx) => {
     if (ctx.from) setUserLanguage(ctx.from.id, 'km');
     await ctx.answerCallbackQuery({ text: 'បានផ្លាស់ប្តូរទៅជាភាសាខ្មែរ! 🇰🇭' });
+    const replyKb = await getMainMenuKeyboard(ctx.from?.id);
     await ctx.reply('✅ បានកំណត់ភាសាទៅជា <b>ភាសាខ្មែរ</b>។ ក្តារចុចត្រូវបានធ្វើបច្ចុប្បន្នភាព!', {
         parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard(ctx.from?.id)
+        reply_markup: replyKb
     });
 });
 
 startHandler.callbackQuery('lang_en', async (ctx) => {
     if (ctx.from) setUserLanguage(ctx.from.id, 'en');
     await ctx.answerCallbackQuery({ text: 'Language switched to English! 🇺🇸' });
+    const replyKb = await getMainMenuKeyboard(ctx.from?.id);
     await ctx.reply('✅ Preferred language updated to <b>English</b>. Keyboard refreshed!', {
         parse_mode: 'HTML',
-        reply_markup: getMainMenuKeyboard(ctx.from?.id)
+        reply_markup: replyKb
     });
 });
 

@@ -96,21 +96,19 @@ async function renderInboxView(userId: number) {
 }
 
 // Handler for Temp Mail command & Reply Keyboard button
-const sendTempMailView = async (ctx: any) => {
+export const sendTempMailView = async (ctx: any) => {
     if (!ctx.from) return;
     const userId = ctx.from.id;
     const isKm = getUserLanguage(userId) === 'km';
 
-    if (!config.ADMIN_IDS.includes(userId)) {
-        const isEnabled = await isFeatureEnabled('tempmail');
-        if (!isEnabled) {
-            return ctx.reply(
-                isKm
-                    ? '⚠️ <b>មុខងារអ៊ីមែលបណ្តោះអាសន្នត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
-                    : '⚠️ <b>TempMail module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
-                { parse_mode: 'HTML' }
-            );
-        }
+    const isEnabled = await isFeatureEnabled('tempmail');
+    if (!isEnabled) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារអ៊ីមែលបណ្តោះអាសន្នត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>TempMail module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
     }
 
     const { text, keyboard } = await renderInboxView(userId);
@@ -130,6 +128,21 @@ const sendTempMailView = async (ctx: any) => {
 
 tempmailHandler.hears(['📧 អ៊ីមែលបណ្តោះអាសន្ន', '📧 Temp Mail', '📧 អ៊ីមែល'], sendTempMailView);
 tempmailHandler.command('tempmail', sendTempMailView);
+
+// Guard middleware: prevents accessing mailbox actions when tempmail module is disabled
+tempmailHandler.use(async (ctx, next) => {
+    if (ctx.callbackQuery?.data && ctx.callbackQuery.data.startsWith('mail_')) {
+        const isEnabled = await isFeatureEnabled('tempmail');
+        if (!isEnabled) {
+            const isKm = getUserLanguage(ctx.from?.id) === 'km';
+            return ctx.answerCallbackQuery({
+                text: isKm ? '⚠️ មុខងារអ៊ីមែលបណ្តោះអាសន្នត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ TempMail module is temporarily paused',
+                show_alert: true
+            });
+        }
+    }
+    return next();
+});
 
 // Refresh Inbox Callback
 tempmailHandler.callbackQuery('mail_refresh', async (ctx) => {

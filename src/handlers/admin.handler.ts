@@ -31,7 +31,7 @@ import {
     getAdminState,
     setAdminState
 } from '../services/welcome.service';
-import { getMainMenuKeyboard } from './start.handler';
+import { getMainMenuKeyboard, getMainMenuInlineKeyboard } from './start.handler';
 import { escapeHtml } from '../utils/telegram-format';
 import fs from 'fs';
 import path from 'path';
@@ -1417,8 +1417,14 @@ adminHandler.callbackQuery('admin_preview_welcome', async (ctx) => {
     if (!isAdmin(ctx) || !userId) return ctx.answerCallbackQuery({ text: 'Unauthorized', show_alert: true });
     await ctx.answerCallbackQuery({ text: 'កំពុងបង្កើតគំរូ Preview... 👀' });
 
+    const statuses = await getAllFeaturesStatus();
+    const [inlineKb, replyKb] = await Promise.all([
+        getMainMenuInlineKeyboard(userId),
+        getMainMenuKeyboard(userId)
+    ]);
+
     const config = await getCustomWelcomeConfig();
-    const rawCaption = config.caption || getDefaultWelcomeCaption();
+    const rawCaption = config.caption || getDefaultWelcomeCaption(statuses);
     const formattedCaption = formatWelcomeCaption(rawCaption, {
         firstName: ctx.from?.first_name || 'Admin',
         username: ctx.from?.username,
@@ -1430,20 +1436,24 @@ adminHandler.callbackQuery('admin_preview_welcome', async (ctx) => {
             await ctx.replyWithPhoto(config.photoFileId, {
                 caption: formattedCaption,
                 parse_mode: 'HTML',
-                reply_markup: getMainMenuKeyboard(userId)
+                reply_markup: inlineKb
             });
         } catch (e) {
             await ctx.reply(formattedCaption, {
                 parse_mode: 'HTML',
-                reply_markup: getMainMenuKeyboard(userId)
+                reply_markup: inlineKb
             });
         }
     } else {
         await ctx.reply(formattedCaption, {
             parse_mode: 'HTML',
-            reply_markup: getMainMenuKeyboard(userId)
+            reply_markup: inlineKb
         });
     }
+
+    await ctx.reply('👇 ជ្រើសរើសមុខងារខាងលើ ឬប្រើក្តារចុចរហ័សខាងក្រោម៖', {
+        reply_markup: replyKb
+    });
 
     const backMenu = new InlineKeyboard()
         .text('🔙 ត្រឡប់ទៅ Welcome Settings', 'admin_welcome')

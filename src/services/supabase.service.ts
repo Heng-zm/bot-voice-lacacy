@@ -328,16 +328,26 @@ export async function getSupabaseSetting(key: string, fallback = ''): Promise<st
 export async function setSupabaseSetting(key: string, value: string, updatedBy?: number): Promise<boolean> {
     if (!supabase) return false;
     try {
+        const payload: any = {
+            key,
+            value,
+            updated_at: new Date().toISOString()
+        };
+        if (updatedBy) payload.updated_by = updatedBy;
+
         const { error } = await supabase
             .from('bot_settings')
-            .upsert({
-                key,
-                value,
-                updated_by: updatedBy || null,
-                updated_at: new Date().toISOString()
-            }, { onConflict: 'key' });
+            .upsert(payload, { onConflict: 'key' });
 
-        return !error;
+        if (error) {
+            // Auto-fallback: if updated_by violates foreign key constraint, retry without it
+            const { error: retryErr } = await supabase
+                .from('bot_settings')
+                .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+            return !retryErr;
+        }
+
+        return true;
     } catch (e) {
         return false;
     }

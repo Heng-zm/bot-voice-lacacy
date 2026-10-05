@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { getUserLanguage } from './i18n';
 import { logger } from './logger';
 import { isRedisConnected } from '../services/redis.service';
+import { isFeatureEnabledSync, FeatureKey } from '../services/features.service';
 
 /**
  * Safely edits a message's text without throwing if the message was not modified or expired.
@@ -120,7 +121,11 @@ function formatUptime(seconds: number, isKm: boolean): string {
 /**
  * Generates an interactive, animated component status report
  */
-export function getComponentStatusReport(userId?: number, customPing?: number) {
+export function getComponentStatusReport(
+    userId?: number,
+    customPing?: number,
+    featuresStatus?: Partial<Record<FeatureKey, boolean>>
+) {
     const isKm = getUserLanguage(userId) === 'km';
     const uptimeSec = process.uptime();
     const uptime = formatUptime(uptimeSec, isKm);
@@ -135,27 +140,39 @@ export function getComponentStatusReport(userId?: number, customPing?: number) {
     const redisStatusKm = redisOk ? '🟢 <code>CONNECTED [TLS Cloud]</code>' : '🔴 <code>OFFLINE</code>';
     const redisStatusEn = redisOk ? '🟢 <code>CONNECTED [TLS Cloud]</code>' : '🔴 <code>OFFLINE</code>';
 
+    const isFeat = (feat: FeatureKey) => {
+        if (featuresStatus && featuresStatus[feat] !== undefined) return !!featuresStatus[feat];
+        return isFeatureEnabledSync(feat);
+    };
+
+    const statusKm = (feat: FeatureKey, activeText: string) => {
+        return isFeat(feat) ? `🟢 <code>${activeText}</code>` : '🔴 <code>DISABLED [Admin Paused]</code>';
+    };
+    const statusEn = (feat: FeatureKey, activeText: string) => {
+        return isFeat(feat) ? `🟢 <code>${activeText}</code>` : '🔴 <code>DISABLED [Admin Paused]</code>';
+    };
+
     const text = isKm ?
 `⚡ <b>ស្ថានភាពដំណើរការប្រព័ន្ធ & មុខងារ (Component Live Status)</b> ⚡
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 🤖 <b>សន្ទនាជាមួយ AI (Gemini 3.6 Flash)៖</b>
-   • ស្ថានភាព៖ 🟢 <code>ACTIVE (High-Speed Neural)</code>
+   • ស្ថានភាព៖ ${statusKm('chat', 'ACTIVE (High-Speed Neural)')}
    • មុខងារ៖ <i>AI Assistant, Khmer/English Chat & Voice Transcriber</i>
 
 🔊 <b>ស្ទូឌីយោបំប្លែងសំឡេង (Edge Neural TTS 96k Studio)៖</b>
-   • ស្ថានភាព៖ 🟢 <code>ONLINE [Studio HD]</code>
+   • ស្ថានភាព៖ ${statusKm('tts', 'ONLINE [Studio HD]')}
    • មុខងារ៖ <i>១០ ភាសា (ខ្មែរ, អង់គ្លេស, ចិន, កូរ៉េ, ជប៉ុន, ហិណ្ឌី, ម៉ាឡេស៊ី, ឥណ្ឌូនេស៊ី, ហ្វីលីពីន, អារ៉ាប់) - សំឡេងប្រុស & ស្រី ✨</i>
 
 📸 <b>ស្កេនរូបភាព (Gemini 3.6 Vision OCR)៖</b>
-   • ស្ថានភាព៖ 🟢 <code>READY [High Precision]</code>
+   • ស្ថានភាព៖ ${statusKm('vision', 'READY [High Precision]')}
    • មុខងារ៖ <i>ស្រង់អក្សរពីរូបភាព & បកប្រែជាភាសាខ្មែរ</i>
 
 📧 <b>អ៊ីមែលបណ្តោះអាសន្ន (Temp Mail Realtime)៖</b>
-   • ស្ថានភាព៖ 🟢 <code>WATCHING (4s Pulse ⚡)</code>
+   • ស្ថានភាព៖ ${statusKm('tempmail', 'WATCHING (4s Pulse ⚡)')}
    • មុខងារ៖ <i>Real-time Inbox Alert & 1-Tap OTP Grabber</i>
 
 📥 <b>ប្រព័ន្ធទាញយកមេឌា (Media Downloader)៖</b>
-   • ស្ថានភាព៖ 🟢 <code>OPERATIONAL [HD/MP3]</code>
+   • ស្ថានភាព៖ ${statusKm('downloader', 'OPERATIONAL [HD/MP3]')}
    • មុខងារ៖ <i>TikTok, YouTube, Facebook, IG Reels</i>
 
 🗄️ <b>ទិន្នន័យក្លោដ & Cache (Redis Cloud)៖</b>
@@ -175,23 +192,23 @@ export function getComponentStatusReport(userId?: number, customPing?: number) {
 `⚡ <b>Bot Components Live Status & Health</b> ⚡
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 🤖 <b>AI Chat Assistant (Gemini 3.6 Flash):</b>
-   • Status: 🟢 <code>ACTIVE (High-Speed Neural)</code>
+   • Status: ${statusEn('chat', 'ACTIVE (High-Speed Neural)')}
    • Features: <i>Intelligent Chat & Voice Note Transcriber</i>
 
 🔊 <b>Direct Text-to-Speech (Edge Neural 96k Studio):</b>
-   • Status: 🟢 <code>ONLINE [Studio HD]</code>
+   • Status: ${statusEn('tts', 'ONLINE [Studio HD]')}
    • Features: <i>10 Languages (KM, EN, ZH, KO, JA, HI, MS, ID, FIL, AR) - Ultra-Realistic Male & Female Voices ✨</i>
 
 📸 <b>Gemini 3.6 Vision OCR:</b>
-   • Status: 🟢 <code>READY [High Precision]</code>
+   • Status: ${statusEn('vision', 'READY [High Precision]')}
    • Features: <i>Photo Text Extraction & Khmer Translation</i>
 
 📧 <b>Temp Mail Realtime:</b>
-   • Status: 🟢 <code>WATCHING (4s Pulse ⚡)</code>
+   • Status: ${statusEn('tempmail', 'WATCHING (4s Pulse ⚡)')}
    • Features: <i>Push Notifications & 1-Tap OTP Grabber</i>
 
 📥 <b>Media Downloader:</b>
-   • Status: 🟢 <code>OPERATIONAL [HD/MP3]</code>
+   • Status: ${statusEn('downloader', 'OPERATIONAL [HD/MP3]')}
    • Features: <i>TikTok, YouTube, Facebook, IG Reels</i>
 
 🗄️ <b>Database & Cache (Redis Cloud):</b>

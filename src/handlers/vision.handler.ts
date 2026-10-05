@@ -110,16 +110,14 @@ async function processImageFile(ctx: any, fileId: string) {
     const t = getTranslation(ctx.from?.id);
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
 
-    if (ctx.from?.id && !config.ADMIN_IDS.includes(ctx.from.id)) {
-        const isEnabled = await isFeatureEnabled('vision');
-        if (!isEnabled) {
-            return ctx.reply(
-                isKm
-                    ? '⚠️ <b>មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
-                    : '⚠️ <b>Vision OCR module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
-                { parse_mode: 'HTML' }
-            );
-        }
+    const isEnabled = await isFeatureEnabled('vision');
+    if (!isEnabled) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Vision OCR module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
     }
 
     if (ctx.from?.id) {
@@ -205,7 +203,42 @@ async function processImageFile(ctx: any, fileId: string) {
     }
 }
 
+visionHandler.command(['vision', 'ocr'], async (ctx) => {
+    const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+    const isEnabled = await isFeatureEnabled('vision');
+    if (!isEnabled) {
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Vision OCR module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
+
+    const t = getTranslation(userId);
+    try {
+        if (ctx.message?.message_id) {
+            await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id);
+        }
+    } catch (e) {}
+
+    await ctx.reply(t.vision_info, {
+        parse_mode: 'HTML'
+    });
+});
+
 visionHandler.on('message:photo', async (ctx) => {
+    const isEnabled = await isFeatureEnabled('vision');
+    if (!isEnabled) {
+        const isKm = getUserLanguage(ctx.from?.id) === 'km';
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Vision OCR module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
     const photo = ctx.message.photo[ctx.message.photo.length - 1]; // Highest resolution
     await processImageFile(ctx, photo.file_id);
 });
@@ -215,6 +248,17 @@ visionHandler.on('message:document', async (ctx, next) => {
     const fileName = ctx.message.document.file_name || '';
     const isImage = mime.startsWith('image/') || /\.(jpe?g|png|webp|bmp)$/i.test(fileName);
     if (!isImage) return next();
+
+    const isEnabled = await isFeatureEnabled('vision');
+    if (!isEnabled) {
+        const isKm = getUserLanguage(ctx.from?.id) === 'km';
+        return ctx.reply(
+            isKm
+                ? '⚠️ <b>មុខងារស្កេនរូបភាព OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន</b>\n<i>Admin បានបិទមុខងារនេះបណ្តោះអាសន្នដើម្បីថែទាំ។ សូមអភ័យទោសចំពោះការរំខាន!</i>'
+                : '⚠️ <b>Vision OCR module is temporarily paused</b>\n<i>Administrators have paused this module for maintenance. Please check back later!</i>',
+            { parse_mode: 'HTML' }
+        );
+    }
 
     if (ctx.message.document.file_size && ctx.message.document.file_size > 20 * 1024 * 1024) {
         const isKm = getUserLanguage(ctx.from?.id) === 'km';
@@ -227,6 +271,15 @@ visionHandler.on('message:document', async (ctx, next) => {
 visionHandler.callbackQuery('translate_khmer', async (ctx) => {
     const t = getTranslation(ctx.from?.id);
     const isKm = getUserLanguage(ctx.from?.id) === 'km';
+
+    const isEnabled = await isFeatureEnabled('vision');
+    if (!isEnabled) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '⚠️ មុខងារស្កេន OCR ត្រូវបានផ្អាកជាបណ្តោះអាសន្ន' : '⚠️ Vision OCR is temporarily paused',
+            show_alert: true
+        });
+    }
+
     await ctx.answerCallbackQuery({ text: t.vision_translating });
     
     if (!ctx.callbackQuery.message) return;

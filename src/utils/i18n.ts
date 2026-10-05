@@ -1,4 +1,5 @@
 import { redisGet, redisSet } from '../services/redis.service';
+import { FeatureKey, isFeatureEnabledSync } from '../services/features.service';
 
 export type Language = 'km' | 'en';
 
@@ -59,15 +60,20 @@ export async function loadUserNotificationPreference(userId: number): Promise<bo
 
 export const strings = {
     km: {
-        welcome: (name: string) =>
-            `🌟 <b>សួស្តី ${name}!</b> សូមស្វាគមន៍មកកាន់ <b>@sddaDCbOT</b>!\n\n` +
-            `✨ <b>មុខងាររបស់អ្នក</b>៖\n` +
-            `• 🤖 <b>AI Chat៖</b> សួរ សរសេរ និងទទួលជំនួយដោយ Gemini\n` +
-            `• 🔊 <b>Text-to-Speech៖</b> បម្លែងអត្ថបទជាសំឡេង ១០ ភាសា (ខ្មែរ, អង់គ្លេស, ចិន, កូរ៉េ, ជប៉ុន, ហិណ្ឌី, ម៉ាឡេស៊ី, ឥណ្ឌូនេស៊ី, ហ្វីលីពីន, អារ៉ាប់)\n` +
-            `• 📸 <b>Vision OCR៖</b> ស្រង់អក្សរពីរូបភាព\n` +
-            `• 📧 <b>Temp Mail៖</b> ទទួលអ៊ីមែល និង OTP ជូនដំណឹងភ្លាមៗ\n` +
-            `• 📥 <b>Media Downloader៖</b> ទាញយកពី TikTok, YouTube, Instagram និង Facebook\n\n` +
-            `👇 <b>ជ្រើសរើសមុខងារមួយខាងក្រោមដើម្បីចាប់ផ្តើម</b>៖`,
+        welcome: (name: string, features?: Partial<Record<FeatureKey, boolean>>) => {
+            const isFeat = (k: FeatureKey) => (features && features[k] !== undefined) ? !!features[k] : isFeatureEnabledSync(k);
+            const bullets: string[] = [];
+            if (isFeat('chat')) bullets.push('• 🤖 <b>AI Chat៖</b> សួរ សរសេរ និងទទួលជំនួយដោយ Gemini');
+            if (isFeat('tts')) bullets.push('• 🔊 <b>Text-to-Speech៖</b> បម្លែងអត្ថបទជាសំឡេង ១០ ភាសា (ខ្មែរ, អង់គ្លេស, ចិន, កូរ៉េ, ជប៉ុន, ហិណ្ឌី, ម៉ាឡេស៊ី, ឥណ្ឌូនេស៊ី, ហ្វីលីពីន, អារ៉ាប់)');
+            if (isFeat('vision')) bullets.push('• 📸 <b>Vision OCR៖</b> ស្រង់អក្សរពីរូបភាព');
+            if (isFeat('tempmail')) bullets.push('• 📧 <b>Temp Mail៖</b> ទទួលអ៊ីមែល និង OTP ជូនដំណឹងភ្លាមៗ');
+            if (isFeat('downloader')) bullets.push('• 📥 <b>Media Downloader៖</b> ទាញយកពី TikTok, YouTube, Instagram និង Facebook');
+
+            return `🌟 <b>សួស្តី ${name}!</b> សូមស្វាគមន៍មកកាន់ <b>@sddaDCbOT</b>!\n\n` +
+                   `✨ <b>មុខងាររបស់អ្នក</b>៖\n` +
+                   (bullets.length > 0 ? `${bullets.join('\n')}\n\n` : '') +
+                   `👇 <b>ជ្រើសរើសមុខងារមួយខាងក្រោមដើម្បីចាប់ផ្តើម</b>៖`;
+        },
         menu_ai_chat: '🤖 សន្ទនា AI',
         menu_tts: '🔊 បំប្លែងសំឡេង TTS',
         menu_voice: '🤖 សន្ទនា AI',
@@ -156,15 +162,20 @@ export const strings = {
         settings_lang_chosen: '✅ បានកំណត់ភាសាទៅជា <b>ភាសាខ្មែរ</b>។'
     },
     en: {
-        welcome: (name: string) =>
-            `🌟 <b>Hello ${name}!</b> Welcome to <b>@sddaDCbOT</b>.\n\n` +
-            `✨ <b>What you can do</b>:\n` +
-            `• 🤖 <b>AI Chat:</b> Ask questions, write, and get help\n` +
-            `• 🔊 <b>Text-to-Speech:</b> Turn text into audio in 10 languages (Khmer, English, Chinese, Korean, Japanese, Hindi, Malay, Indonesian, Filipino, Arabic)\n` +
-            `• 📸 <b>Vision OCR:</b> Extract text from images\n` +
-            `• 📧 <b>Temp Mail:</b> Get disposable email and OTP alerts\n` +
-            `• 📥 <b>Media Downloader:</b> Download from TikTok, YouTube, Instagram, and Facebook\n\n` +
-            `👇 <b>Choose a feature below to get started</b>:`,
+        welcome: (name: string, features?: Partial<Record<FeatureKey, boolean>>) => {
+            const isFeat = (k: FeatureKey) => (features && features[k] !== undefined) ? !!features[k] : isFeatureEnabledSync(k);
+            const bullets: string[] = [];
+            if (isFeat('chat')) bullets.push('• 🤖 <b>AI Chat:</b> Ask questions, chat and get assistance powered by Gemini');
+            if (isFeat('tts')) bullets.push('• 🔊 <b>Text-to-Speech:</b> Turn text into neural voice across 10 languages (KM, EN, ZH, KO, JA, HI, MS, ID, FIL, AR)');
+            if (isFeat('vision')) bullets.push('• 📸 <b>Vision OCR:</b> Extract text from images & translate to Khmer');
+            if (isFeat('tempmail')) bullets.push('• 📧 <b>Temp Mail:</b> Disposable email inbox with instant OTP notifications');
+            if (isFeat('downloader')) bullets.push('• 📥 <b>Media Downloader:</b> Download videos from TikTok, YouTube, Instagram and Facebook');
+
+            return `🌟 <b>Hello ${name}!</b> Welcome to <b>@sddaDCbOT</b>.\n\n` +
+                   `✨ <b>What you can do</b>:\n` +
+                   (bullets.length > 0 ? `${bullets.join('\n')}\n\n` : '') +
+                   `👇 <b>Choose a feature below to get started</b>:`;
+        },
         menu_ai_chat: '🤖 AI Chat',
         menu_tts: '🔊 Text to Speech',
         menu_voice: '🤖 AI Chat',
