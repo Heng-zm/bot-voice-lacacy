@@ -269,6 +269,34 @@ export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): P
         );
 
         if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
+            // Remux with faststart if it's video and ffmpeg is available so Telegram can stream and play natively
+            if (isVideo && ffmpegPath) {
+                try {
+                    const remuxedPath = targetPath.replace('.mp4', '_fast.mp4');
+                    const { execFile } = await import('child_process');
+                    const { promisify } = await import('util');
+                    const execFileAsync = promisify(execFile);
+
+                    await execFileAsync(ffmpegPath, [
+                        '-y',
+                        '-i', targetPath,
+                        '-map', '0:v:0',
+                        '-map', '0:a:0?',
+                        '-c', 'copy',
+                        '-movflags', '+faststart',
+                        remuxedPath
+                    ], { timeout: 15000 });
+
+                    if (fs.existsSync(remuxedPath) && fs.statSync(remuxedPath).size > 0) {
+                        fs.unlinkSync(targetPath);
+                        fs.renameSync(remuxedPath, targetPath);
+                        logger.info('DOWNLOADER_TIKTOK', `Remuxed TikTok video with faststart and video stream first`);
+                    }
+                } catch (remuxErr: any) {
+                    logger.warn('DOWNLOADER_TIKTOK', `FFmpeg faststart remux skipped: ${remuxErr.message}`);
+                }
+            }
+
             logger.success('DOWNLOADER_TIKTOK', `Successfully downloaded TikTok ${isVideo ? 'video' : 'audio'} via TikWM: ${targetFilename} (${(fs.statSync(targetPath).size / 1024 / 1024).toFixed(2)} MB)`);
             return targetPath;
         }

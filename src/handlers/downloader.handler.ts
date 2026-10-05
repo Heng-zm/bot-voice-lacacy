@@ -263,37 +263,40 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                 ).catch(() => {});
             }
 
-            const fileName = path.basename(filePath);
             const platform = getMediaPlatformBadge(url);
+            const cleanFileName = isVideo ? `${platform.name}_Video.mp4` : `${platform.name}_Audio.mp3`;
             let sendSuccess = false;
-            const docKeyboard = new InlineKeyboard().text('🗑️ លុបសារ (Delete)', 'delete_this_msg');
+            const docKeyboard = new InlineKeyboard().url(isKm ? '📥 ទាញយក (Download)' : '📥 Download', url);
+            const mediaCaption = isVideo
+                ? `${platform.emoji} <b>${platform.name} - ${isKm ? 'វីដេអូ HD' : 'HD Video'}</b>\n📦 <b>${isKm ? 'ទំហំ' : 'Size'}:</b> ${fileSizeMb} MB`
+                : `${platform.emoji} <b>${platform.name} - ${isKm ? 'ចម្រៀង MP3' : 'MP3 Audio'}</b>\n📦 <b>${isKm ? 'ទំហំ' : 'Size'}:</b> ${fileSizeMb} MB`;
 
             // 1. Send as native Video player if user chose Video
             if (isVideo) {
                 try {
-                    await ctx.replyWithVideo(new InputFile(filePath, fileName), {
-                        caption: `${platform.emoji} <b>${platform.name} - ${isKm ? 'វីដេអូ HD' : 'HD Video'}</b>\n📁 <code>${fileName}</code> (${fileSizeMb} MB)`,
+                    await ctx.replyWithVideo(new InputFile(filePath, cleanFileName), {
+                        caption: mediaCaption,
                         parse_mode: 'HTML',
                         reply_markup: docKeyboard,
                         reply_parameters: userMsgId ? { message_id: userMsgId } : undefined,
                         supports_streaming: true
                     });
                     sendSuccess = true;
-                    logger.success('DOWNLOADER', `Video stream sent to user ${userId}: ${fileName} (${fileSizeMb} MB)`);
+                    logger.success('DOWNLOADER', `Video stream sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
                 } catch (vErr) {
                     logger.warn('DOWNLOADER', 'replyWithVideo failed, falling back to document upload', vErr);
                 }
             } else {
                 // 2. Send as Telegram Audio Player if user chose MP3 Audio
                 try {
-                    await ctx.replyWithAudio(new InputFile(filePath, fileName), {
-                        caption: `${platform.emoji} <b>${platform.name} - ${isKm ? 'ចម្រៀង MP3' : 'MP3 Audio'}</b>\n📁 <code>${fileName}</code> (${fileSizeMb} MB)`,
+                    await ctx.replyWithAudio(new InputFile(filePath, cleanFileName), {
+                        caption: mediaCaption,
                         parse_mode: 'HTML',
                         reply_markup: docKeyboard,
                         reply_parameters: userMsgId ? { message_id: userMsgId } : undefined
                     });
                     sendSuccess = true;
-                    logger.success('DOWNLOADER', `MP3 Audio sent to user ${userId}: ${fileName} (${fileSizeMb} MB)`);
+                    logger.success('DOWNLOADER', `MP3 Audio sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
                 } catch (audioErr) {
                     logger.warn('DOWNLOADER', 'replyWithAudio failed, falling back to document upload', audioErr);
                 }
@@ -301,14 +304,14 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
 
             // 3. Fallback to Document if primary media format failed
             if (!sendSuccess) {
-                await ctx.replyWithDocument(new InputFile(filePath, fileName), {
-                    caption: `${platform.emoji} <b>${platform.name}</b>\n📁 <code>${fileName}</code> (${fileSizeMb} MB)`,
+                await ctx.replyWithDocument(new InputFile(filePath, cleanFileName), {
+                    caption: mediaCaption,
                     parse_mode: 'HTML',
                     reply_markup: docKeyboard,
                     reply_parameters: userMsgId ? { message_id: userMsgId } : undefined
                 });
                 sendSuccess = true;
-                logger.success('DOWNLOADER', `Document file fallback sent to user ${userId}: ${fileName} (${fileSizeMb} MB)`);
+                logger.success('DOWNLOADER', `Document file fallback sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
             }
 
             // Clean chat: Delete progress message and original user link message
