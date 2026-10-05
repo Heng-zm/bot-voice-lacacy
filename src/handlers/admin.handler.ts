@@ -10,7 +10,9 @@ import {
     fetchSupabaseSummary,
     fetchRecentConversations,
     fetchUserFullProfile,
-    fetchDonationsAnalytics
+    fetchDonationsAnalytics,
+    fetchAllSupabaseUsers,
+    SupabaseRegisteredUser
 } from '../services/supabase.service';
 import {
     FEATURES,
@@ -765,33 +767,278 @@ adminHandler.command('msg', async (ctx) => {
     }
 });
 
-// User Analytics Callback
+interface EnrichedUserItem {
+    userId: number;
+    username?: string;
+    firstName?: string;
+    createdAt?: string;
+    lastActive?: string;
+    source: 'supabase' | 'redis' | 'both';
+    isAdmin: boolean;
+}
+
+/**
+ * Builds the interactive User Base & Audience Analytics view with Supabase and Redis data.
+ */
+async function buildUserAnalyticsView(ctx: any, page = 0) {
+    const supabaseUsers = await fetchAllSupabaseUsers();
+    const redisUsers = isRedisConnected() ? await redisSMembers('bot:active_users') : [];
+    
+    const userMap = new Map<number, EnrichedUserItem>();
+
+    // 1. Populate from Supabase
+    for (const su of supabaseUsers) {
+        userMap.set(su.userId, {
+            userId: su.userId,
+            username: su.username,
+            firstName: su.firstName,
+            createdAt: su.createdAt,
+            lastActive: su.lastActive,
+            source: 'supabase',
+            isAdmin: config.ADMIN_IDS.includes(su.userId)
+        });
+    }
+
+    // 2. Populate / merge from Redis
+    for (const rId of redisUsers) {
+        const id = parseInt(rId, 10);
+        if (Number.isSafeInteger(id) && id > 0) {
+            const existing = userMap.get(id);
+            if (existing) {
+                existing.source = 'both';
+            } else {
+                userMap.set(id, {
+                    userId: id,
+                    source: 'redis',
+                    isAdmin: config.ADMIN_IDS.includes(id)
+                });
+            }
+        }
+    }
+
+    // 3. Ensure admins are present
+    for (const aId of config.ADMIN_IDS) {
+        if (!userMap.has(aId)) {
+            userMap.set(aId, {
+                userId: aId,
+                source: 'redis',
+                isAdmin: true
+            });
+        }
+    }
+
+    const allUsers = Array.from(userMap.values());
+
+    // 4. Enrich missing user names from Telegram API in parallel (up to 20 users)
+    const enrichTargets = allUsers.filter(u => !u.firstName && !u.username).slice(0, 20);
+    if (enrichTargets.length > 0 && ctx.api) {
+        await Promise.allSettled(
+            enrichTargets.map(async (u) => {
+                try {
+                    const chat = await ctx.api.getChat(u.userId);
+                    if (chat) {
+                        u.firstName = chat.first_name || u.firstName;
+                        u.username = chat.username || u.username;
+                    }
+                } catch (e) {}
+            })
+        );
+    }
+
+    // 5. Sort: Admins first, then by joined date descending, then ID descending
+    allUsers.sort((a, b) => {
+        if (a.isAdmin && !b.isAdmin) return -1;
+        if (!a.isAdmin && b.isAdmin) return 1;
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (timeA !== timeB) return timeB - timeA;
+        return b.userId - a.userId;
+    });
+
+    const totalAudience = allUsers.length;
+    const supabaseCount = allUsers.filter(u => u.source === 'supabase' || u.source === 'both').length;
+    const redisCount = allUsers.filter(u => u.source === 'redis' || u.source === 'both').length;
+    const adminCount = allUsers.filter(u => u.isAdmin).length;
+
+    // 6. Pagination
+    const pageSize = 5;
+    const totalPages = Math.ceil(totalAudience / pageSize) || 1;
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+    const pageUsers = allUsers.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
+    // 7. Format user cards
+    let userListFormatted = '';
+    if (allUsers.length === 0) {
+        userListFormatted = '<i>⚠️ មិនទាន់មានទិន្នន័យអ្នកប្រើប្រាស់នៅក្នុង Database នៅឡើយទេ។</i>\n';
+    } else {
+        userListFormatted = pageUsers.map((u, i) => {
+            const rank = safePage * pageSize + i + 1;
+            const name = escapeHtml(u.firstName || 'Telegram User');
+            const handle = u.username ? `@${escapeHtml(u.username)}` : '<i>(គ្មាន @username)</i>';
+            const roleBadge = u.isAdmin ? '👑 <b>[Super Admin]</b>' : '👤 <b>[User]</b>';
+            const sourceBadge = u.source === 'both'
+                ? '🟢 <code>Supabase + Redis</code>'
+                : (u.source === 'supabase' ? '⚡ <code>Supabase Cloud</code>' : '🗄️ <code>Redis Active</code>');
+            
+            let dateStr = 'ថ្មីៗនេះ (Recent)';
+            if (u.createdAt) {
+                try {
+                    const d = new Date(u.createdAt);
+                    dateStr = d.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+                } catch (e) {}
+            }
+
+            return (
+                `<b>${rank}. ${name}</b> (${handle}) ${roleBadge}\n` +
+                `   • 🆔 <b>User ID:</b> <code>${u.userId}</code>\n` +
+                `   • 📡 <b>ប្រព័ន្ធរក្សាទុក:</b> ${sourceBadge}\n` +
+                `   • 📅 <b>ចុះឈ្មោះ/សកម្ម:</b> <code>${dateStr}</code>\n` +
+                `   • ⚡ <i>ពាក្យបញ្ជាផ្ទាល់:</i> <code>/user ${u.userId}</code> | <code>/msg ${u.userId} [សារ]</code>`
+            );
+        }).join('\n\n');
+    }
+
+    const text =
+        `👥 <b>User Base & Audience Analytics (Supabase + Redis)</b>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📊 <b>ចំនួនអ្នកប្រើប្រាស់សរុប (Total Audience):</b> <code>${totalAudience} នាក់</code>\n` +
+        `⚡ <b>Supabase Cloud Subscribers:</b> <code>${supabaseCount}</code>\n` +
+        `🗄️ <b>Redis Real-Time Active:</b> <code>${redisCount}</code>\n` +
+        `👑 <b>Administrators:</b> <code>${adminCount}</code>\n` +
+        `💾 <b>ស្ថានភាពទិន្នន័យ (Storage):</b> 🟢 <code>Cloud Synced Dual-Store</code>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `📋 <b>បញ្ជីអ្នកប្រើប្រាស់ (All Users - ទំព័រ ${safePage + 1}/${totalPages})៖</b>\n\n` +
+        `${userListFormatted}\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `💡 <i>ចុចលើឈ្មោះអ្នកប្រើប្រាស់ខាងក្រោម ដើម្បីមើលប្រវត្តិរូប និងសារសន្ទនា AI ភ្លាមៗ!</i>`;
+
+    const keyboard = new InlineKeyboard();
+
+    // 1-Tap inspect buttons (2 per row)
+    for (let i = 0; i < pageUsers.length; i += 2) {
+        const u1 = pageUsers[i];
+        const u2 = pageUsers[i + 1];
+        const label1 = `👤 ${u1.firstName || u1.userId} ${u1.isAdmin ? '👑' : ''}`;
+        keyboard.text(label1.substring(0, 20), `admin_user_inspect:${u1.userId}`);
+        if (u2) {
+            const label2 = `👤 ${u2.firstName || u2.userId} ${u2.isAdmin ? '👑' : ''}`;
+            keyboard.text(label2.substring(0, 20), `admin_user_inspect:${u2.userId}`);
+        }
+        keyboard.row();
+    }
+
+    // Pagination Row
+    if (totalPages > 1) {
+        if (safePage > 0) {
+            keyboard.text('◀️ ថយក្រោយ', `admin_users_page:${safePage - 1}`);
+        }
+        keyboard.text(`📄 ${safePage + 1}/${totalPages}`, 'noop');
+        if (safePage < totalPages - 1) {
+            keyboard.text('បន្ទាប់ ▶️', `admin_users_page:${safePage + 1}`);
+        }
+        keyboard.row();
+    }
+
+    keyboard
+        .text('🔄 ផ្ទុកឡើងវិញ (Refresh)', `admin_users_page:${safePage}`)
+        .text('📢 ផ្សាយដំណឹង (Broadcast)', 'admin_broadcast')
+        .row()
+        .text('🔙 Back to Dashboard', 'admin_main');
+
+    return { text, keyboard };
+}
+
+// User Analytics Callback (Entry point from Dashboard)
 adminHandler.callbackQuery('admin_users', async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Unauthorized', show_alert: true });
     await ctx.answerCallbackQuery();
 
-    const totalUsers = isRedisConnected() ? await redisSCard('bot:active_users') : 0;
-    const supabaseCount = await getSupabaseSubscribersCount();
-    const adminList = config.ADMIN_IDS.map((id, idx) => `${idx + 1}. <code>${id}</code> (Super Admin)`).join('\n');
+    const { text, keyboard } = await buildUserAnalyticsView(ctx, 0);
+    await ctx.editMessageText(text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+    });
+});
 
-    const text = 
-        `👥 <b>User Base & Audience Analytics</b>\n` +
+// User Analytics Pagination Callback
+adminHandler.callbackQuery(/^admin_users_page:(\d+)$/, async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Unauthorized', show_alert: true });
+    await ctx.answerCallbackQuery();
+
+    const page = parseInt(ctx.match[1], 10) || 0;
+    const { text, keyboard } = await buildUserAnalyticsView(ctx, page);
+    await ctx.editMessageText(text, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+    });
+});
+
+// 1-Tap inspect user callback from User Analytics list
+adminHandler.callbackQuery(/^admin_user_inspect:(\d+)$/, async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCallbackQuery({ text: 'Unauthorized', show_alert: true });
+    await ctx.answerCallbackQuery();
+
+    const targetId = parseInt(ctx.match[1], 10);
+    const profile = await fetchUserFullProfile(targetId);
+
+    let name = 'Telegram User';
+    let handle = 'No username';
+
+    try {
+        const chat = await ctx.api.getChat(targetId);
+        if (chat) {
+            name = chat.first_name || name;
+            handle = chat.username ? `@${chat.username}` : handle;
+        }
+    } catch (e) {}
+
+    if (profile?.firstName) name = profile.firstName;
+    if (profile?.username) handle = `@${profile.username}`;
+
+    const subBadge = (profile?.isSubscriber || true) ? '✅ Supabase Subscriber' : '⚪ Free User';
+    const lastActiveStr = profile?.lastActive ? new Date(profile.lastActive).toLocaleString() : 'N/A';
+    const createdStr = profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString() : 'N/A';
+
+    const text =
+        `👤 <b>ប្រវត្តិរូបអ្នកប្រើប្រាស់ (User Profile)</b>\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `📊 <b>Redis Active Users:</b> <code>${totalUsers}</code>\n` +
-        `⚡ <b>Supabase Subscribers:</b> <code>${supabaseCount}</code>\n` +
-        `💾 <b>ការរក្សាទុកទិន្នន័យ (Storage):</b> 🟢 <code>Redis + Supabase Dual-Sync</code>\n\n` +
-        `👑 <b>បញ្ជី Administrator IDs:</b>\n${adminList}\n\n` +
+        `🆔 <b>User ID:</b> <code>${targetId}</code>\n` +
+        `👤 <b>ឈ្មោះ:</b> <b>${escapeHtml(name)}</b> (${escapeHtml(handle)})\n` +
+        `🏅 <b>ស្ថានភាព:</b> ${subBadge}\n` +
+        `🎙️ <b>ចំណូលចិត្តសំឡេង:</b> <code>${profile?.gender || 'female'}</code> (${profile?.ttsModel || 'auto'})\n` +
+        `🕒 <b>សកម្មចុងក្រោយ:</b> <code>${lastActiveStr}</code>\n` +
+        `📅 <b>ចុះឈ្មោះដំបូង:</b> <code>${createdStr}</code>\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `💡 <i>រាល់ពេលដែលអ្នកប្រើប្រាស់ថ្មី Chat ឬប្រើប្រាស់មុខងារ Bot ប្រព័ន្ធនឹងកត់ត្រា ID ចូលក្នុង Redis និង Supabase DB ដោយស្វ័យប្រវត្តិ។</i>`;
+        `💬 <b>សារសន្ទនា AI សរុប:</b> <code>${profile?.dialogueCount || 0} messages</code>\n` +
+        `☕ <b>ឧបត្ថម្ភសរុប:</b> <code>${profile?.donationCount || 0} ដង ($${(profile?.totalDonated || 0).toFixed(2)} USD)</code>\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `👉 <i>ផ្ញើសារផ្ទាល់៖</i> <code>/msg ${targetId} [សារ]</code>\n` +
+        `👉 <i>មើលការសន្ទនា៖</i> <code>/history ${targetId}</code>`;
 
     const keyboard = new InlineKeyboard()
-        .text('📢 ផ្ញើសារផ្សាយ (Broadcast)', 'admin_broadcast')
-        .text('🔙 Back to Dashboard', 'admin_main');
+        .text('💬 មើលការសន្ទនា (History)', `admin_user_conv:${targetId}`)
+        .row()
+        .text('👥 ត្រឡប់ទៅបញ្ជី Users', 'admin_users')
+        .text('🔙 Admin Dashboard', 'admin_main');
 
     await ctx.editMessageText(text, {
         parse_mode: 'HTML',
         reply_markup: keyboard
     });
+});
+
+// /users Command Handler
+adminHandler.command('users', async (ctx) => {
+    if (!isAdmin(ctx)) {
+        return ctx.reply('⛔ <b>Access Denied:</b> You do not have administrator permissions.', { parse_mode: 'HTML' });
+    }
+    const { text, keyboard } = await buildUserAnalyticsView(ctx, 0);
+    await ctx.reply(text, { parse_mode: 'HTML', reply_markup: keyboard });
+});
+
+// Inactive page counter button callback
+adminHandler.callbackQuery('noop', async (ctx) => {
+    await ctx.answerCallbackQuery();
 });
 
 // Broadcast Announcement Guide Callback

@@ -97,6 +97,15 @@ export async function syncUserToSupabase(user: {
     }
 }
 
+export interface SupabaseRegisteredUser {
+    userId: number;
+    username?: string;
+    firstName?: string;
+    createdAt?: string;
+    lastActive?: string;
+    source: 'supabase' | 'redis' | 'both';
+}
+
 /**
  * Retrieve total number of registered users in Supabase
  */
@@ -104,16 +113,84 @@ export async function getSupabaseSubscribersCount(): Promise<number> {
     if (!supabase) return 0;
     try {
         const { count, error } = await supabase
+            .from('subscribers')
+            .select('*', { count: 'exact', head: true });
+
+        if (!error && typeof count === 'number') {
+            return count;
+        }
+
+        const { count: prefCount } = await supabase
             .from('user_prefs')
             .select('*', { count: 'exact', head: true });
 
-        if (error) {
-            logger.warn('SUPABASE', `Failed to get user_prefs count: ${error.message}`);
-            return 0;
-        }
-        return count || 0;
+        return prefCount || 0;
     } catch (e) {
         return 0;
+    }
+}
+
+/**
+ * Fetch all registered users from Supabase subscribers & user_prefs tables
+ */
+export async function fetchAllSupabaseUsers(): Promise<SupabaseRegisteredUser[]> {
+    if (!supabase) return [];
+    try {
+        const [subRes, prefRes] = await Promise.all([
+            supabase
+                .from('subscribers')
+                .select('chat_id, created_at')
+                .order('created_at', { ascending: false }),
+            supabase
+                .from('user_prefs')
+                .select('user_id, username, first_name, last_active, created_at')
+        ]);
+
+        const userMap = new Map<number, SupabaseRegisteredUser>();
+
+        if (subRes.data && Array.isArray(subRes.data)) {
+            for (const item of subRes.data) {
+                const id = Number(item.chat_id);
+                if (Number.isSafeInteger(id) && id > 0) {
+                    userMap.set(id, {
+                        userId: id,
+                        createdAt: item.created_at,
+                        source: 'supabase'
+                    });
+                }
+            }
+        }
+
+        if (prefRes.data && Array.isArray(prefRes.data)) {
+            for (const item of prefRes.data) {
+                const id = Number(item.user_id);
+                if (Number.isSafeInteger(id) && id > 0) {
+                    const existing = userMap.get(id);
+                    if (existing) {
+                        existing.username = item.username || existing.username;
+                        existing.firstName = item.first_name || existing.firstName;
+                        existing.lastActive = item.last_active;
+                        if (!existing.createdAt && item.created_at) {
+                            existing.createdAt = item.created_at;
+                        }
+                    } else {
+                        userMap.set(id, {
+                            userId: id,
+                            username: item.username,
+                            firstName: item.first_name,
+                            createdAt: item.created_at,
+                            lastActive: item.last_active,
+                            source: 'supabase'
+                        });
+                    }
+                }
+            }
+        }
+
+        return Array.from(userMap.values());
+    } catch (e: any) {
+        logger.error('SUPABASE', 'Failed to fetch all users from Supabase', e);
+        return [];
     }
 }
 
