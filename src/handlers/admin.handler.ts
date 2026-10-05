@@ -181,7 +181,7 @@ async function buildWelcomeManagerView() {
         : '🟢 <b>សារលំនាំដើមប្រព័ន្ធ (Default Bilingual)</b>';
 
     const rawCaption = config.caption || getDefaultWelcomeCaption();
-    const captionSnippet = rawCaption.length > 250 ? rawCaption.substring(0, 250) + '...' : rawCaption;
+    const captionSnippet = safeUtf8Slice(rawCaption, 250);
 
     const photoInfo = config.photoFileId
         ? `<code>${config.photoFileId.substring(0, 24)}...</code> ✅`
@@ -931,10 +931,10 @@ async function buildUserAnalyticsView(ctx: any, page = 0) {
         const u1 = pageUsers[i];
         const u2 = pageUsers[i + 1];
         const label1 = `👤 ${u1.firstName || u1.userId} ${u1.isAdmin ? '👑' : ''}`;
-        keyboard.text(label1.substring(0, 20), `admin_user_inspect:${u1.userId}`);
+        keyboard.text(safeUtf8Slice(label1, 20, false), `admin_user_inspect:${u1.userId}`);
         if (u2) {
             const label2 = `👤 ${u2.firstName || u2.userId} ${u2.isAdmin ? '👑' : ''}`;
-            keyboard.text(label2.substring(0, 20), `admin_user_inspect:${u2.userId}`);
+            keyboard.text(safeUtf8Slice(label2, 20, false), `admin_user_inspect:${u2.userId}`);
         }
         keyboard.row();
     }
@@ -1260,7 +1260,7 @@ adminHandler.callbackQuery('admin_logs', async (ctx) => {
         text += `<b>Last ${Math.min(errors.length, 5)} Error Event(s):</b>\n`;
         errors.slice(0, 5).forEach((err, idx) => {
             const time = err.timestamp.split(' ')[1] || err.timestamp;
-            const cleanMsg = err.message.replace(/</g, '&lt;').replace(/>/g, '&gt;').substring(0, 95);
+            const cleanMsg = safeUtf8Slice(err.message.replace(/</g, '&lt;').replace(/>/g, '&gt;'), 95);
             text += `\n${idx + 1}️⃣ [${time}] <b>[${err.tag}]</b>\n   <code>${cleanMsg}</code>\n`;
         });
     }
