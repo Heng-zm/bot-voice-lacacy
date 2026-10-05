@@ -131,19 +131,13 @@ async function processImageFile(ctx: any, fileId: string) {
             : extractedText;
 
         const safeText = escapeHtml(safeExtracted);
-        const actionKeyboard = new InlineKeyboard()
-            .text(t.vision_translate_btn, 'translate_khmer')
-            .text(isKm ? '🔊 ស្តាប់ជាសំឡេង (Read Aloud)' : '🔊 Read Aloud', 'do_tts_auto')
-            .row()
-            .text(isKm ? '🗑️ លុប (Delete)' : '🗑️ Delete', 'delete_this_msg');
 
         await ctx.api.editMessageText(
             ctx.chat.id, 
             processingMsg.message_id, 
             `✨ <b>[ ▰▰▰▰▰ 100% ]</b> ${t.vision_result}\n\n${safeText}`, 
             {
-                parse_mode: 'HTML',
-                reply_markup: actionKeyboard
+                parse_mode: 'HTML'
             }
         );
     } catch (error: any) {
@@ -207,15 +201,11 @@ visionHandler.callbackQuery('translate_khmer', async (ctx) => {
         }
 
         const formattedTranslation = formatTelegramHtml(safeTranslation);
-        const translatedKeyboard = new InlineKeyboard()
-            .text(isKm ? '🔊 ស្តាប់ជាសំឡេង (Read Aloud)' : '🔊 Read Aloud', 'do_tts_auto')
-            .text(isKm ? '🗑️ លុប (Delete)' : '🗑️ Delete', 'delete_this_msg');
 
         await ctx.editMessageText(
             `${t.vision_translated_title}\n\n${formattedTranslation}`, 
             {
-                parse_mode: 'HTML',
-                reply_markup: translatedKeyboard
+                parse_mode: 'HTML'
             }
         );
     } catch (error: any) {
