@@ -121,8 +121,8 @@ downloaderHandler.hears(urlRegex, async (ctx) => {
     pendingDownloads.set(token, { url, userMsgId, timestamp: Date.now() });
 
     const menu = new InlineKeyboard()
-        .text(isKm ? '🎬 វីដេអូ (Video HD)' : '🎬 Video HD', `dl_vid:${token}`)
-        .text(isKm ? '🎵 ចម្រៀង (MP3 Audio)' : '🎵 MP3 Audio', `dl_aud:${token}`).row()
+        .text(isKm ? '📥 ទាញយកវីដេអូ MP4 (Download Video)' : '📥 Download Video (MP4)', `dl_vid:${token}`)
+        .text(isKm ? '🎵 ទាញយកចម្រៀង MP3 (Download Audio)' : '🎵 Download Audio (MP3)', `dl_aud:${token}`).row()
         .text(isKm ? '❌ បោះបង់ (Cancel)' : '❌ Cancel', 'delete_this_msg');
 
     await ctx.reply(
@@ -275,7 +275,7 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
             const platform = getMediaPlatformBadge(url);
             const cleanFileName = isVideo ? `${platform.name}_Video.mp4` : `${platform.name}_Audio.mp3`;
             let sendSuccess = false;
-            const docKeyboard = new InlineKeyboard().url(isKm ? '📥 ទាញយក (Download)' : '📥 Download', url);
+            const docKeyboard = new InlineKeyboard().text(isKm ? '🗑️ លុបសារ (Delete)' : '🗑️ Delete', 'delete_this_msg');
 
             const safeTitle = mediaTitle ? mediaTitle.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 100) : null;
             const safeArtist = mediaArtist ? mediaArtist.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 60) : null;
@@ -306,7 +306,10 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                         videoOptions.duration = Math.round(mediaDuration);
                     }
                     if (thumbnailPath && fs.existsSync(thumbnailPath)) {
-                        videoOptions.thumbnail = new InputFile(thumbnailPath);
+                        const thumbStat = fs.statSync(thumbnailPath);
+                        if (thumbStat.size > 0 && thumbStat.size <= 200 * 1024) {
+                            videoOptions.thumbnail = new InputFile(thumbnailPath);
+                        }
                     }
 
                     await ctx.replyWithVideo(new InputFile(filePath, cleanFileName), videoOptions);
@@ -330,7 +333,10 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                         audioOptions.duration = Math.round(mediaDuration);
                     }
                     if (thumbnailPath && fs.existsSync(thumbnailPath)) {
-                        audioOptions.thumbnail = new InputFile(thumbnailPath);
+                        const thumbStat = fs.statSync(thumbnailPath);
+                        if (thumbStat.size > 0 && thumbStat.size <= 200 * 1024) {
+                            audioOptions.thumbnail = new InputFile(thumbnailPath);
+                        }
                     }
 
                     await ctx.replyWithAudio(new InputFile(filePath, cleanFileName), audioOptions);

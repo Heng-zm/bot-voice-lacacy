@@ -309,12 +309,13 @@ export async function downloadTikTokDirect(safeUrl: string, isVideo: boolean): P
                     const { promisify } = await import('util');
                     const execFileAsync = promisify(execFile);
 
-                    // Convert to standard JPEG (handles WebP/PNG/JPEG effortlessly)
+                    // Convert to standard JPEG under 200KB (handles WebP/PNG/JPEG effortlessly)
                     await execFileAsync(ffmpegPath, [
                         '-y',
                         '-i', rawCoverPath,
+                        '-vf', "scale='min(320,iw)':-2",
                         '-frames:v', '1',
-                        '-q:v', '2',
+                        '-q:v', '5',
                         jpgCoverPath
                     ], { timeout: 10000 });
 
