@@ -61,10 +61,23 @@ export function getTTSCaption(_lang?: SupportedTTSLanguage, _gender?: VoiceGende
 /**
  * Main action keyboard for voice note: provides Male/Female voice switch and Voice Speed buttons
  */
-export function getTTSVoiceKeyboard(token: string, currentLang?: SupportedTTSLanguage, isKm = true): InlineKeyboard {
+export function getTTSVoiceKeyboard(
+    token: string,
+    currentLang?: SupportedTTSLanguage,
+    isKm = true,
+    currentGender: VoiceGender = 'female'
+): InlineKeyboard {
+    const maleText = isKm
+        ? (currentGender === 'male' ? '👨 សម្លេងប្រុស ✅' : '👨 សម្លេងប្រុស')
+        : (currentGender === 'male' ? '👨 Male Voice ✅' : '👨 Male Voice');
+
+    const femaleText = isKm
+        ? (currentGender === 'female' ? '👩 សម្លេងស្រី ✅' : '👩 សម្លេងស្រី')
+        : (currentGender === 'female' ? '👩 Female Voice ✅' : '👩 Female Voice');
+
     return new InlineKeyboard()
-        .text(isKm ? '👨 សម្លេងប្រុស' : '👨 Male Voice', `tts_v:male:${token}`)
-        .text(isKm ? '👩 សម្លេងស្រី' : '👩 Female Voice', `tts_v:female:${token}`)
+        .text(maleText, `tts_v:male:${token}`)
+        .text(femaleText, `tts_v:female:${token}`)
         .row()
         .text(isKm ? '⚡ ល្បឿនសម្លេង' : '⚡ Voice Speed', `tts_speed:${token}`);
 }
@@ -277,7 +290,7 @@ audioHandler.command('tts', async (ctx) => {
         if (audioPath && fs.existsSync(audioPath)) {
             const token = createTTSToken();
             await saveTTSTextCache(token, textToSpeak, targetLang, undefined, prefGender, prefSpeed);
-            const voiceKeyboard = getTTSVoiceKeyboard(token, targetLang, isKm);
+            const voiceKeyboard = getTTSVoiceKeyboard(token, targetLang, isKm, prefGender);
             const caption = getTTSCaption(targetLang, prefGender, isKm);
 
             const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
@@ -421,7 +434,7 @@ audioHandler.on('message:text', async (ctx, next) => {
                 if (audioPath && fs.existsSync(audioPath)) {
                     const token = createTTSToken();
                     await saveTTSTextCache(token, ctx.message.text, lang, undefined, prefGender, prefSpeed);
-                    const voiceKeyboard = getTTSVoiceKeyboard(token, lang, isKm);
+                    const voiceKeyboard = getTTSVoiceKeyboard(token, lang, isKm, prefGender);
                     const caption = getTTSCaption(lang, prefGender, isKm);
 
                     const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
@@ -574,7 +587,7 @@ audioHandler.callbackQuery(
             if (audioPath && fs.existsSync(audioPath)) {
                 const token = createTTSToken();
                 await saveTTSTextCache(token, text, targetLang, undefined, prefGender, prefSpeed);
-                const voiceKeyboard = getTTSVoiceKeyboard(token, targetLang, isKm);
+                const voiceKeyboard = getTTSVoiceKeyboard(token, targetLang, isKm, prefGender);
                 const caption = getTTSCaption(targetLang, prefGender, isKm);
 
                 const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
@@ -616,15 +629,24 @@ audioHandler.callbackQuery(/^tts_v:(male|female):([a-z0-9]+)$/, async (ctx) => {
     const userLang = getUserLanguage(userId);
     const isKm = userLang === 'km';
 
-    if (userId) {
-        setUserVoiceGender(userId, targetGender);
-    }
-
     // 1. Retrieve text and language from cache
     const cacheItem = await getTTSTextCache(token);
     let text = cacheItem?.text;
     let lang: SupportedTTSLanguage = cacheItem?.lang || (isKm ? 'km' : 'en');
     const speed = cacheItem?.speed || getUserVoiceSpeed(userId);
+    const currentGender = cacheItem?.gender || (userId ? getUserVoiceGender(userId) : 'female');
+
+    if (currentGender === targetGender) {
+        return ctx.answerCallbackQuery({
+            text: isKm
+                ? (targetGender === 'male' ? 'សំឡេងប្រុសកំពុងដំណើរការស្រាប់ហើយ! ✅' : 'សំឡេងស្រីកំពុងដំណើរការស្រាប់ហើយ! ✅')
+                : `${targetGender === 'male' ? 'Male' : 'Female'} voice is already active! ✅`
+        });
+    }
+
+    if (userId) {
+        setUserVoiceGender(userId, targetGender);
+    }
 
     // 2. Fallback to extracting from message or reply
     if (!text) {
@@ -653,14 +675,18 @@ audioHandler.callbackQuery(/^tts_v:(male|female):([a-z0-9]+)$/, async (ctx) => {
         if (audioPath && fs.existsSync(audioPath)) {
             const newToken = createTTSToken();
             await saveTTSTextCache(newToken, text, lang, undefined, targetGender, speed);
-            const voiceKeyboard = getTTSVoiceKeyboard(newToken, lang, isKm);
+            const voiceKeyboard = getTTSVoiceKeyboard(newToken, lang, isKm, targetGender);
             const caption = getTTSCaption(lang, targetGender, isKm);
+
+            const oldMsg = ctx.callbackQuery.message;
+            const oldMessageId = oldMsg?.message_id;
+            const replyToMsgId = oldMsg?.reply_to_message?.message_id;
 
             const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
                 caption,
                 parse_mode: 'HTML',
                 reply_markup: voiceKeyboard,
-                reply_parameters: { message_id: ctx.callbackQuery.message?.message_id || ctx.callbackQuery.message?.reply_to_message?.message_id }
+                reply_parameters: replyToMsgId ? { message_id: replyToMsgId } : undefined
             });
 
             if (sent.voice?.file_id) {
@@ -668,6 +694,15 @@ audioHandler.callbackQuery(/^tts_v:(male|female):([a-z0-9]+)$/, async (ctx) => {
             }
 
             try { fs.unlinkSync(audioPath); } catch (e) {}
+
+            // Delete old voice message
+            if (oldMessageId) {
+                try {
+                    await ctx.api.deleteMessage(ctx.chat!.id, oldMessageId);
+                } catch (delErr) {
+                    logger.warn('TTS_GENDER_CALLBACK', 'Could not delete old voice message', delErr);
+                }
+            }
         } else {
             await ctx.reply(isKm ? '❌ មិនអាចបង្កើតសំឡេងបានទេ។' : '❌ Could not generate audio.');
         }
@@ -737,14 +772,18 @@ audioHandler.callbackQuery(/^tts_s:(0\.75x|1\.0x|1\.25x|1\.5x):([a-z0-9]+)$/, as
         if (audioPath && fs.existsSync(audioPath)) {
             const newToken = createTTSToken();
             await saveTTSTextCache(newToken, text, lang, undefined, gender, targetSpeed);
-            const voiceKeyboard = getTTSVoiceKeyboard(newToken, lang, isKm);
+            const voiceKeyboard = getTTSVoiceKeyboard(newToken, lang, isKm, gender);
             const caption = getTTSCaption(lang, gender, isKm);
+
+            const oldMsg = ctx.callbackQuery.message;
+            const oldMessageId = oldMsg?.message_id;
+            const replyToMsgId = oldMsg?.reply_to_message?.message_id;
 
             const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
                 caption,
                 parse_mode: 'HTML',
                 reply_markup: voiceKeyboard,
-                reply_parameters: { message_id: ctx.callbackQuery.message?.message_id || ctx.callbackQuery.message?.reply_to_message?.message_id }
+                reply_parameters: replyToMsgId ? { message_id: replyToMsgId } : undefined
             });
 
             if (sent.voice?.file_id) {
@@ -752,6 +791,15 @@ audioHandler.callbackQuery(/^tts_s:(0\.75x|1\.0x|1\.25x|1\.5x):([a-z0-9]+)$/, as
             }
 
             try { fs.unlinkSync(audioPath); } catch (e) {}
+
+            // Delete old voice message
+            if (oldMessageId) {
+                try {
+                    await ctx.api.deleteMessage(ctx.chat!.id, oldMessageId);
+                } catch (delErr) {
+                    logger.warn('TTS_SPEED_CALLBACK', 'Could not delete old voice message', delErr);
+                }
+            }
         } else {
             await ctx.reply(isKm ? '❌ មិនអាចបង្កើតសំឡេងបានទេ។' : '❌ Could not generate audio.');
         }
@@ -789,7 +837,7 @@ audioHandler.callbackQuery(/^tts_back:([a-z0-9]+)$/, async (ctx) => {
 
     try {
         await ctx.editMessageReplyMarkup({
-            reply_markup: getTTSVoiceKeyboard(token, item?.lang || 'km', isKm)
+            reply_markup: getTTSVoiceKeyboard(token, item?.lang || 'km', isKm, item?.gender || getUserVoiceGender(userId))
         });
     } catch (e) {}
 });
@@ -831,14 +879,18 @@ audioHandler.callbackQuery(/^tts_l:([a-z]+):([a-z0-9]+)$/, async (ctx) => {
         if (audioPath && fs.existsSync(audioPath)) {
             const newToken = createTTSToken();
             await saveTTSTextCache(newToken, text, targetLang, undefined, gender, speed);
-            const voiceKeyboard = getTTSVoiceKeyboard(newToken, targetLang, isKm);
+            const voiceKeyboard = getTTSVoiceKeyboard(newToken, targetLang, isKm, gender);
             const caption = getTTSCaption(targetLang, gender, isKm);
+
+            const oldMsg = ctx.callbackQuery.message;
+            const oldMessageId = oldMsg?.message_id;
+            const replyToMsgId = oldMsg?.reply_to_message?.message_id;
 
             const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
                 caption,
                 parse_mode: 'HTML',
                 reply_markup: voiceKeyboard,
-                reply_parameters: { message_id: ctx.callbackQuery.message?.message_id || ctx.callbackQuery.message?.reply_to_message?.message_id }
+                reply_parameters: replyToMsgId ? { message_id: replyToMsgId } : undefined
             });
 
             if (sent.voice?.file_id) {
@@ -846,6 +898,15 @@ audioHandler.callbackQuery(/^tts_l:([a-z]+):([a-z0-9]+)$/, async (ctx) => {
             }
 
             try { fs.unlinkSync(audioPath); } catch (e) {}
+
+            // Delete old voice message
+            if (oldMessageId) {
+                try {
+                    await ctx.api.deleteMessage(ctx.chat!.id, oldMessageId);
+                } catch (delErr) {
+                    logger.warn('TTS_LANG_SWITCH', 'Could not delete old voice message', delErr);
+                }
+            }
         } else {
             await ctx.reply(isKm ? '❌ មិនអាចបង្កើតសំឡេងបានទេ។' : '❌ Could not generate audio.');
         }

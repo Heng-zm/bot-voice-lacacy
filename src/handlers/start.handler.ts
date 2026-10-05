@@ -138,7 +138,7 @@ startHandler.command(['start', 'menu'], async (ctx) => {
             const isKm = getUserLanguage(userId) === 'km' || item.lang === 'km';
             const newToken = createTTSToken();
             await saveTTSTextCache(newToken, item.text, item.lang, item.voiceFileId, item.gender);
-            const voiceKeyboard = getTTSVoiceKeyboard(newToken, item.lang, isKm);
+            const voiceKeyboard = getTTSVoiceKeyboard(newToken, item.lang, isKm, item.gender || 'female');
             const cfg = TTS_LANGUAGES[item.lang] || TTS_LANGUAGES['km'];
 
             const caption = `${cfg.flag} <b>${cfg.nameKm} / ${cfg.nativeName} (Shared Voice Note ✨)</b>\n<i>"${escapeHtml(item.text.substring(0, 120))}"</i>\n\n<i>💡 ចុចសញ្ញា ↪️ Forward ដើម្បីផ្ញើសំឡេងផ្ទាល់</i>`;
@@ -1066,7 +1066,7 @@ startHandler.callbackQuery(/^tts_sample:(km|en)$/, async (ctx) => {
         if (audioPath && fs.existsSync(audioPath)) {
             const token = createTTSToken();
             await saveTTSTextCache(token, textToSpeak, lang, undefined, gender);
-            const voiceKeyboard = getTTSVoiceKeyboard(token, lang, isKm);
+            const voiceKeyboard = getTTSVoiceKeyboard(token, lang, isKm, gender);
             const caption = getTTSCaption(lang, gender, isKm);
 
             const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
