@@ -33,12 +33,26 @@ interface PendingDownload {
 }
 const pendingDownloads = new Map<string, PendingDownload>();
 
-// Periodically clean up old pending download tokens (older than 10 mins)
+// Store sent file_id so users can re-download as document without re-uploading
+interface SentMediaRef {
+    fileId: string;
+    fileName: string;
+    caption: string;
+    timestamp: number;
+}
+const sentMediaRefs = new Map<string, SentMediaRef>();
+
+// Periodically clean up old pending download tokens (older than 10 mins) and sent media refs (older than 30 mins)
 setInterval(() => {
     const now = Date.now();
     for (const [token, item] of pendingDownloads.entries()) {
         if (now - item.timestamp > 10 * 60 * 1000) {
             pendingDownloads.delete(token);
+        }
+    }
+    for (const [key, ref] of sentMediaRefs.entries()) {
+        if (now - ref.timestamp > 30 * 60 * 1000) {
+            sentMediaRefs.delete(key);
         }
     }
 }, 5 * 60 * 1000);
@@ -86,6 +100,45 @@ downloaderHandler.callbackQuery('delete_this_msg', async (ctx) => {
     try {
         await ctx.deleteMessage();
     } catch (e) {}
+});
+
+// Callback: Download as document file (📄 Download button)
+downloaderHandler.callbackQuery(/^dl_doc:([a-z0-9]+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    const ref = sentMediaRefs.get(token);
+    const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+
+    if (!ref) {
+        await ctx.answerCallbackQuery({
+            text: isKm ? 'តំណភ្ជាប់នេះផុតកំណត់ហើយ! សូមទាញយកម្ដងទៀត។' : 'Link expired. Please download again.',
+            show_alert: true
+        });
+        return;
+    }
+
+    await ctx.answerCallbackQuery({
+        text: isKm ? 'កំពុងផ្ញើឯកសារ... 📄' : 'Sending document file... 📄'
+    });
+
+    try {
+        await ctx.replyWithChatAction('upload_document');
+        await ctx.replyWithDocument(ref.fileId, {
+            caption: ref.caption,
+            parse_mode: 'HTML',
+            reply_parameters: ctx.callbackQuery.message?.message_id
+                ? { message_id: ctx.callbackQuery.message.message_id }
+                : undefined
+        });
+        logger.success('DOWNLOADER', `Document re-sent via Download button to user ${userId}: ${ref.fileName}`);
+    } catch (err: any) {
+        logger.error('DOWNLOADER', `Failed to send document via Download button`, err);
+        await ctx.reply(
+            isKm
+                ? '❌ មិនអាចផ្ញើឯកសារបានទេ។ សូមព្យាយាមទាញយកម្ដងទៀត។'
+                : '❌ Failed to send document. Please try downloading again.'
+        );
+    }
 });
 
 // Media link listener: prompts user to choose between Video HD or MP3 Audio
@@ -275,7 +328,7 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
             const platform = getMediaPlatformBadge(url);
             const cleanFileName = isVideo ? `${platform.name}_Video.mp4` : `${platform.name}_Audio.mp3`;
             let sendSuccess = false;
-            const docKeyboard = new InlineKeyboard().text(isKm ? '🗑️ លុបសារ (Delete)' : '🗑️ Delete', 'delete_this_msg');
+            const docToken = Math.random().toString(36).substring(2, 8);
 
             const safeTitle = mediaTitle ? mediaTitle.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 100) : null;
             const safeArtist = mediaArtist ? mediaArtist.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 60) : null;
@@ -291,6 +344,8 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                 mediaCaption += `\n👤 <b>${isKm ? 'អ្នកបង្កើត' : 'Artist'}:</b> <code>${safeArtist}</code>`;
             }
             mediaCaption += `\n📦 <b>${isKm ? 'ទំហំ' : 'Size'}:</b> ${fileSizeMb} MB`;
+
+            const docKeyboard = new InlineKeyboard().text(isKm ? '📄 ទាញយកឯកសារ (Download)' : '📄 Download File', `dl_doc:${docToken}`);
 
             // 1. Send as native Video player if user chose Video
             if (isVideo) {
@@ -312,8 +367,18 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                         }
                     }
 
-                    await ctx.replyWithVideo(new InputFile(filePath, cleanFileName), videoOptions);
+                    const sentMsg = await ctx.replyWithVideo(new InputFile(filePath, cleanFileName), videoOptions);
                     sendSuccess = true;
+                    // Store the file_id from Telegram so Download button can re-send as document
+                    const fileId = sentMsg?.video?.file_id;
+                    if (fileId) {
+                        sentMediaRefs.set(docToken, {
+                            fileId,
+                            fileName: cleanFileName,
+                            caption: mediaCaption,
+                            timestamp: Date.now()
+                        });
+                    }
                     logger.success('DOWNLOADER', `Video stream sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
                 } catch (vErr) {
                     logger.warn('DOWNLOADER', 'replyWithVideo failed, falling back to document upload', vErr);
@@ -339,8 +404,18 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
                         }
                     }
 
-                    await ctx.replyWithAudio(new InputFile(filePath, cleanFileName), audioOptions);
+                    const sentMsg = await ctx.replyWithAudio(new InputFile(filePath, cleanFileName), audioOptions);
                     sendSuccess = true;
+                    // Store file_id for Download button
+                    const fileId = sentMsg?.audio?.file_id;
+                    if (fileId) {
+                        sentMediaRefs.set(docToken, {
+                            fileId,
+                            fileName: cleanFileName,
+                            caption: mediaCaption,
+                            timestamp: Date.now()
+                        });
+                    }
                     logger.success('DOWNLOADER', `MP3 Audio sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
                 } catch (audioErr) {
                     logger.warn('DOWNLOADER', 'replyWithAudio failed, falling back to document upload', audioErr);
@@ -349,13 +424,21 @@ downloaderHandler.callbackQuery(/^dl_(vid|aud):([a-z0-9]+)$/, async (ctx) => {
 
             // 3. Fallback to Document if primary media format failed
             if (!sendSuccess) {
-                await ctx.replyWithDocument(new InputFile(filePath, cleanFileName), {
+                const sentMsg = await ctx.replyWithDocument(new InputFile(filePath, cleanFileName), {
                     caption: mediaCaption,
                     parse_mode: 'HTML',
-                    reply_markup: docKeyboard,
                     reply_parameters: userMsgId ? { message_id: userMsgId } : undefined
                 });
                 sendSuccess = true;
+                const fileId = sentMsg?.document?.file_id;
+                if (fileId) {
+                    sentMediaRefs.set(docToken, {
+                        fileId,
+                        fileName: cleanFileName,
+                        caption: mediaCaption,
+                        timestamp: Date.now()
+                    });
+                }
                 logger.success('DOWNLOADER', `Document file fallback sent to user ${userId}: ${cleanFileName} (${fileSizeMb} MB)`);
             }
 
