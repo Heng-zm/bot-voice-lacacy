@@ -476,18 +476,9 @@ startHandler.hears(['🤖 សន្ទនា AI', '🤖 AI Chat', '🗣️ ស�
         }
     } catch (e) {}
 
-    const chatKb = new InlineKeyboard()
-        .text(isKm ? '💡 សំណួរគំរូ (Sample Prompts)' : '💡 Sample Prompts', 'chat_samples')
-        .text(isKm ? '🎙️ របៀបសន្ទនាសំឡេង' : '🎙️ Voice Guide', 'voice_record')
-        .row()
-        .text(isKm ? '🧹 សម្អាតប្រវត្តិសន្ទនា' : '🧹 Clear Chat History', 'chat_clear');
-
     await ctx.reply(t.ai_chat_title, {
         parse_mode: 'HTML',
         reply_markup: getSubmenuBackKeyboard(userId)
-    });
-    await ctx.reply(isKm ? '👇 ជ្រើសរើសសកម្មភាពរហ័ស ឬវាយសួរសំណួរផ្ទាល់៖' : '👇 Choose quick action or type your question below:', {
-        reply_markup: chatKb
     });
 });
 
