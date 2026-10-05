@@ -283,10 +283,24 @@ export function detectLanguage(text: string, fallback: SupportedTTSLanguage = 'k
  * Generate ultra-realistic Microsoft Edge Neural Voice (Male or Female)
  * across 10 supported languages with studio 24kHz/96kbps quality, 60s timeout, and auto-retry.
  */
+export function speedToRate(speed = '1.0x'): string {
+    switch (speed) {
+        case '0.75x': return '-25%';
+        case '1.25x': return '+25%';
+        case '1.5x': return '+50%';
+        default: return 'default';
+    }
+}
+
+/**
+ * Generate ultra-realistic Microsoft Edge Neural Voice (Male or Female)
+ * across 10 supported languages with rate control, 7s/5s timeout, and auto-retry.
+ */
 export async function generateNeuralTTS(
     text: string,
     lang: SupportedTTSLanguage = 'km',
-    gender: VoiceGender = 'female'
+    gender: VoiceGender = 'female',
+    speed = '1.0x'
 ): Promise<string | null> {
     const clean = cleanTextForTTS(text);
     if (!clean) return null;
@@ -296,6 +310,7 @@ export async function generateNeuralTTS(
     const altGender: VoiceGender = gender === 'male' ? 'female' : 'male';
     const altVoice = langConfig.voices[altGender] || langConfig.voices['female'];
     const edgeLang = langConfig.edgeLang;
+    const rate = speedToRate(speed);
     const filename = `neural_tts_${lang}_${gender}_${Date.now()}_${Math.random().toString(36).substring(7)}.mp3`;
     const outputPath = path.join(DOWNLOAD_DIR, filename);
 
@@ -304,13 +319,14 @@ export async function generateNeuralTTS(
         const edgeTts = new EdgeTTS({
             voice,
             lang: edgeLang,
+            rate,
             outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
             timeout: 7000
         });
         await edgeTts.ttsPromise(clean.substring(0, 1500), outputPath);
 
         if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-            logger.info('NEURAL_TTS', `Generated ${gender} neural voice for ${lang} (${clean.length} chars)`);
+            logger.info('NEURAL_TTS', `Generated ${gender} neural voice for ${lang} (${clean.length} chars, speed ${speed})`);
             return outputPath;
         }
     } catch (err1: any) {
@@ -325,13 +341,14 @@ export async function generateNeuralTTS(
         const retryEdgeTts = new EdgeTTS({
             voice: altVoice,
             lang: edgeLang,
+            rate,
             outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
             timeout: 5000
         });
         await retryEdgeTts.ttsPromise(clean.substring(0, 1200), outputPath);
 
         if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
-            logger.info('NEURAL_TTS', `Generated fallback ${altGender} neural voice on retry for ${lang}`);
+            logger.info('NEURAL_TTS', `Generated fallback ${altGender} neural voice on retry for ${lang} (speed ${speed})`);
             return outputPath;
         }
     } catch (err2: any) {
@@ -455,6 +472,38 @@ export async function loadUserVoiceGender(userId: number): Promise<VoiceGender> 
 }
 
 // ==========================================
+// User Voice Speed Preferences (0.75x, 1.0x, 1.25x, 1.5x)
+// ==========================================
+const userVoiceSpeeds = new Map<number, string>();
+
+export function getUserVoiceSpeed(userId?: number): string {
+    if (!userId) return '1.0x';
+    return userVoiceSpeeds.get(userId) || '1.0x';
+}
+
+export function setUserVoiceSpeed(userId: number, speed: string): void {
+    userVoiceSpeeds.set(userId, speed);
+    if (userVoiceSpeeds.size > 5000) {
+        const oldest = userVoiceSpeeds.keys().next().value;
+        if (oldest) userVoiceSpeeds.delete(oldest);
+    }
+    redisSet(`user:speed:${userId}`, speed, 30 * 86400).catch(() => {});
+    const numSpeed = speed === '0.75x' ? 0.75 : (speed === '1.25x' ? 1.25 : (speed === '1.5x' ? 1.5 : 1.0));
+    updateUserPrefsInSupabase(userId, { speed: numSpeed }).catch(() => {});
+}
+
+export async function loadUserVoiceSpeed(userId: number): Promise<string> {
+    if (userVoiceSpeeds.has(userId)) return userVoiceSpeeds.get(userId)!;
+    const cached = await redisGet<string>(`user:speed:${userId}`);
+    if (cached) {
+        userVoiceSpeeds.set(userId, cached);
+        return cached;
+    }
+    userVoiceSpeeds.set(userId, '1.0x');
+    return '1.0x';
+}
+
+// ==========================================
 // Token Caching for Gender Buttons Callback Query & Shared Voice Notes
 // ==========================================
 export interface TTSCacheItem {
@@ -462,6 +511,7 @@ export interface TTSCacheItem {
     lang: SupportedTTSLanguage;
     voiceFileId?: string;
     gender?: VoiceGender;
+    speed?: string;
 }
 
 const ttsTextCache = new Map<string, TTSCacheItem>();
@@ -475,9 +525,10 @@ export async function saveTTSTextCache(
     text: string,
     lang: SupportedTTSLanguage,
     voiceFileId?: string,
-    gender?: VoiceGender
+    gender?: VoiceGender,
+    speed?: string
 ): Promise<void> {
-    const item: TTSCacheItem = { text, lang, voiceFileId, gender };
+    const item: TTSCacheItem = { text, lang, voiceFileId, gender, speed };
     ttsTextCache.set(token, item);
     if (ttsTextCache.size > 500) {
         const oldestKey = ttsTextCache.keys().next().value;
@@ -490,7 +541,7 @@ export async function updateTTSVoiceFileId(token: string, voiceFileId: string): 
     const item = await getTTSTextCache(token);
     if (item) {
         item.voiceFileId = voiceFileId;
-        await saveTTSTextCache(token, item.text, item.lang, voiceFileId, item.gender);
+        await saveTTSTextCache(token, item.text, item.lang, voiceFileId, item.gender, item.speed);
     }
 }
 

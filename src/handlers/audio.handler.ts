@@ -6,6 +6,8 @@ import {
     getUserVoicePreference,
     getUserVoiceGender,
     setUserVoiceGender,
+    getUserVoiceSpeed,
+    setUserVoiceSpeed,
     createTTSToken,
     saveTTSTextCache,
     getTTSTextCache,
@@ -57,10 +59,33 @@ export function getTTSCaption(_lang?: SupportedTTSLanguage, _gender?: VoiceGende
 }
 
 /**
- * Main action keyboard for voice note: returns undefined to keep chat clean without extra buttons
+ * Main action keyboard for voice note: provides Male/Female voice switch and Voice Speed buttons
  */
-export function getTTSVoiceKeyboard(token: string, currentLang: SupportedTTSLanguage, isKm: boolean): InlineKeyboard | undefined {
-    return undefined;
+export function getTTSVoiceKeyboard(token: string, currentLang?: SupportedTTSLanguage, isKm = true): InlineKeyboard {
+    return new InlineKeyboard()
+        .text(isKm ? '👨 សម្លេងប្រុស' : '👨 Male Voice', `tts_v:male:${token}`)
+        .text(isKm ? '👩 សម្លេងស្រី' : '👩 Female Voice', `tts_v:female:${token}`)
+        .row()
+        .text(isKm ? '⚡ ល្បឿនសម្លេង' : '⚡ Voice Speed', `tts_speed:${token}`);
+}
+
+/**
+ * Speed selection keyboard: 0.75x, 1.0x, 1.25x, 1.5x
+ */
+export function getTTSSpeedPickerKeyboard(token: string, isKm = true, currentSpeed = '1.0x'): InlineKeyboard {
+    const s075 = currentSpeed === '0.75x' ? '✅ 🐢 0.75x' : '🐢 0.75x';
+    const s100 = currentSpeed === '1.0x' ? '✅ 🟢 1.0x' : '🟢 1.0x';
+    const s125 = currentSpeed === '1.25x' ? '✅ ⚡ 1.25x' : '⚡ 1.25x';
+    const s150 = currentSpeed === '1.5x' ? '✅ 🚀 1.5x' : '🚀 1.5x';
+
+    return new InlineKeyboard()
+        .text(s075, `tts_s:0.75x:${token}`)
+        .text(s100, `tts_s:1.0x:${token}`)
+        .row()
+        .text(s125, `tts_s:1.25x:${token}`)
+        .text(s150, `tts_s:1.5x:${token}`)
+        .row()
+        .text(isKm ? '🔙 ត្រឡប់ក្រោយ' : '🔙 Back', `tts_back:${token}`);
 }
 
 /**
@@ -244,11 +269,12 @@ audioHandler.command('tts', async (ctx) => {
     try {
         await ctx.replyWithChatAction('record_voice');
         const prefGender = getUserVoiceGender(userId);
-        const audioPath = await generateNeuralTTS(textToSpeak, targetLang, prefGender);
+        const prefSpeed = getUserVoiceSpeed(userId);
+        const audioPath = await generateNeuralTTS(textToSpeak, targetLang, prefGender, prefSpeed);
 
         if (audioPath && fs.existsSync(audioPath)) {
             const token = createTTSToken();
-            await saveTTSTextCache(token, textToSpeak, targetLang, undefined, prefGender);
+            await saveTTSTextCache(token, textToSpeak, targetLang, undefined, prefGender, prefSpeed);
             const voiceKeyboard = getTTSVoiceKeyboard(token, targetLang, isKm);
             const caption = getTTSCaption(targetLang, prefGender, isKm);
 
@@ -388,10 +414,11 @@ audioHandler.on('message:text', async (ctx, next) => {
                     ? pref 
                     : detectLanguage(ctx.message.text, isKm ? 'km' : 'en');
                 const prefGender = getUserVoiceGender(userId);
-                const audioPath = await generateNeuralTTS(ctx.message.text, lang, prefGender);
+                const prefSpeed = getUserVoiceSpeed(userId);
+                const audioPath = await generateNeuralTTS(ctx.message.text, lang, prefGender, prefSpeed);
                 if (audioPath && fs.existsSync(audioPath)) {
                     const token = createTTSToken();
-                    await saveTTSTextCache(token, ctx.message.text, lang, undefined, prefGender);
+                    await saveTTSTextCache(token, ctx.message.text, lang, undefined, prefGender, prefSpeed);
                     const voiceKeyboard = getTTSVoiceKeyboard(token, lang, isKm);
                     const caption = getTTSCaption(lang, prefGender, isKm);
 
@@ -537,13 +564,14 @@ audioHandler.callbackQuery(
                 : [`${cfg.flag} <b>Generating ${cfg.nameEn} voice...</b>`, '🎙️ <b>Creating natural speech...</b> ▰▰▱', '🔊 <b>Almost ready...</b> ▰▰▰']);
 
             const prefGender = getUserVoiceGender(userId);
-            const audioPath = await generateNeuralTTS(text, targetLang, prefGender);
+            const prefSpeed = getUserVoiceSpeed(userId);
+            const audioPath = await generateNeuralTTS(text, targetLang, prefGender, prefSpeed);
             progress.stop();
             await ctx.api.deleteMessage(ctx.chat!.id, progress.messageId).catch(() => {});
 
             if (audioPath && fs.existsSync(audioPath)) {
                 const token = createTTSToken();
-                await saveTTSTextCache(token, text, targetLang, undefined, prefGender);
+                await saveTTSTextCache(token, text, targetLang, undefined, prefGender, prefSpeed);
                 const voiceKeyboard = getTTSVoiceKeyboard(token, targetLang, isKm);
                 const caption = getTTSCaption(targetLang, prefGender, isKm);
 
@@ -594,6 +622,7 @@ audioHandler.callbackQuery(/^tts_v:(male|female):([a-z0-9]+)$/, async (ctx) => {
     const cacheItem = await getTTSTextCache(token);
     let text = cacheItem?.text;
     let lang: SupportedTTSLanguage = cacheItem?.lang || (isKm ? 'km' : 'en');
+    const speed = cacheItem?.speed || getUserVoiceSpeed(userId);
 
     // 2. Fallback to extracting from message or reply
     if (!text) {
@@ -618,10 +647,10 @@ audioHandler.callbackQuery(/^tts_v:(male|female):([a-z0-9]+)$/, async (ctx) => {
     try {
         await ctx.replyWithChatAction('record_voice');
 
-        const audioPath = await generateNeuralTTS(text, lang, targetGender);
+        const audioPath = await generateNeuralTTS(text, lang, targetGender, speed);
         if (audioPath && fs.existsSync(audioPath)) {
             const newToken = createTTSToken();
-            await saveTTSTextCache(newToken, text, lang, undefined, targetGender);
+            await saveTTSTextCache(newToken, text, lang, undefined, targetGender, speed);
             const voiceKeyboard = getTTSVoiceKeyboard(newToken, lang, isKm);
             const caption = getTTSCaption(lang, targetGender, isKm);
 
@@ -642,6 +671,90 @@ audioHandler.callbackQuery(/^tts_v:(male|female):([a-z0-9]+)$/, async (ctx) => {
         }
     } catch (err: any) {
         logger.error('TTS_GENDER_CALLBACK', 'Gender voice switch error', err, { targetGender, userId });
+        await ctx.reply(`❌ TTS Error: ${err.message}`);
+    }
+});
+
+// ==========================================
+// Open Speed Selection Menu
+// ==========================================
+audioHandler.callbackQuery(/^tts_speed:([a-z0-9]+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    const userId = ctx.from?.id;
+    const isKm = getUserLanguage(userId) === 'km';
+    const cacheItem = await getTTSTextCache(token);
+    const currentSpeed = cacheItem?.speed || getUserVoiceSpeed(userId);
+    await ctx.answerCallbackQuery({ text: isKm ? '⚡ ជ្រើសរើសល្បឿនសម្លេង...' : '⚡ Choose voice speed...' });
+
+    try {
+        await ctx.editMessageReplyMarkup({
+            reply_markup: getTTSSpeedPickerKeyboard(token, isKm, currentSpeed)
+        });
+    } catch (e) {}
+});
+
+// ==========================================
+// Select Speed Callback Query: tts_s:<speed>:<token>
+// ==========================================
+audioHandler.callbackQuery(/^tts_s:(0\.75x|1\.0x|1\.25x|1\.5x):([a-z0-9]+)$/, async (ctx) => {
+    const targetSpeed = ctx.match[1];
+    const token = ctx.match[2];
+    const userId = ctx.from?.id;
+    const userLang = getUserLanguage(userId);
+    const isKm = userLang === 'km';
+
+    if (userId) {
+        setUserVoiceSpeed(userId, targetSpeed);
+    }
+
+    const cacheItem = await getTTSTextCache(token);
+    let text = cacheItem?.text;
+    let lang: SupportedTTSLanguage = cacheItem?.lang || (isKm ? 'km' : 'en');
+    let gender: VoiceGender = cacheItem?.gender || getUserVoiceGender(userId);
+
+    if (!text) {
+        text = extractTextFromQuery(ctx);
+        lang = detectLanguage(text, isKm ? 'km' : 'en');
+    }
+
+    if (!text) {
+        return ctx.answerCallbackQuery({
+            text: isKm ? '❌ មិនអាចរកអត្ថបទឃើញទេ។' : '❌ Text not found.',
+            show_alert: true
+        });
+    }
+
+    await ctx.answerCallbackQuery({
+        text: isKm ? `⚡ ល្បឿន ${targetSpeed}...` : `⚡ Speed ${targetSpeed}...`
+    });
+
+    try {
+        await ctx.replyWithChatAction('record_voice');
+
+        const audioPath = await generateNeuralTTS(text, lang, gender, targetSpeed);
+        if (audioPath && fs.existsSync(audioPath)) {
+            const newToken = createTTSToken();
+            await saveTTSTextCache(newToken, text, lang, undefined, gender, targetSpeed);
+            const voiceKeyboard = getTTSVoiceKeyboard(newToken, lang, isKm);
+            const caption = getTTSCaption(lang, gender, isKm);
+
+            const sent = await ctx.replyWithVoice(new InputFile(audioPath), {
+                caption,
+                parse_mode: 'HTML',
+                reply_markup: voiceKeyboard,
+                reply_parameters: { message_id: ctx.callbackQuery.message?.message_id || ctx.callbackQuery.message?.reply_to_message?.message_id }
+            });
+
+            if (sent.voice?.file_id) {
+                await updateTTSVoiceFileId(newToken, sent.voice.file_id);
+            }
+
+            try { fs.unlinkSync(audioPath); } catch (e) {}
+        } else {
+            await ctx.reply(isKm ? '❌ មិនអាចបង្កើតសំឡេងបានទេ។' : '❌ Could not generate audio.');
+        }
+    } catch (err: any) {
+        logger.error('TTS_SPEED_CALLBACK', 'Speed voice switch error', err, { targetSpeed, userId });
         await ctx.reply(`❌ TTS Error: ${err.message}`);
     }
 });
@@ -692,6 +805,7 @@ audioHandler.callbackQuery(/^tts_l:([a-z]+):([a-z0-9]+)$/, async (ctx) => {
     const cacheItem = await getTTSTextCache(token);
     let text = cacheItem?.text;
     const gender = cacheItem?.gender || getUserVoiceGender(userId);
+    const speed = cacheItem?.speed || getUserVoiceSpeed(userId);
 
     if (!text) {
         text = extractTextFromQuery(ctx);
@@ -711,10 +825,10 @@ audioHandler.callbackQuery(/^tts_l:([a-z]+):([a-z0-9]+)$/, async (ctx) => {
 
     try {
         await ctx.replyWithChatAction('record_voice');
-        const audioPath = await generateNeuralTTS(text, targetLang, gender);
+        const audioPath = await generateNeuralTTS(text, targetLang, gender, speed);
         if (audioPath && fs.existsSync(audioPath)) {
             const newToken = createTTSToken();
-            await saveTTSTextCache(newToken, text, targetLang, undefined, gender);
+            await saveTTSTextCache(newToken, text, targetLang, undefined, gender, speed);
             const voiceKeyboard = getTTSVoiceKeyboard(newToken, targetLang, isKm);
             const caption = getTTSCaption(targetLang, gender, isKm);
 
