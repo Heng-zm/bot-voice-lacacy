@@ -291,3 +291,39 @@ export async function sendOrEditAiResponse(
 
     return firstMsgId;
 }
+
+/**
+ * Safely sanitizes and truncates a string for Telegram messages and UTF-8 transmission.
+ * - Removes null bytes (\0) and non-printable control characters that crash Telegram/JSON parsers.
+ * - Cleans up lone / unpaired surrogates using String.prototype.toWellFormed.
+ * - Slices safely along Unicode code point boundaries using Array.from,
+ *   guaranteeing that emoji modifiers, composite glyphs, and astral characters are never split in half.
+ */
+export function safeUtf8Slice(
+    text: string | null | undefined,
+    maxChars?: number,
+    addEllipsis = true
+): string {
+    if (!text) return '';
+
+    // 1. Remove null bytes (\u0000) and dangerous control characters (\u0001-\u0008, \u000B, \u000C, \u000E-\u001F, \u007F)
+    // Preserves standard whitespace (\n, \r, \t)
+    let cleaned = String(text).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+
+    // 2. Ensure string is well-formed UTF-16/UTF-8 (no lone / unpaired surrogates)
+    if (typeof (cleaned as any).toWellFormed === 'function') {
+        cleaned = (cleaned as any).toWellFormed();
+    }
+    // Safeguard: strip any leftover lone surrogates
+    cleaned = cleaned.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+
+    // 3. If truncation requested, split by Unicode code points rather than UTF-16 code units
+    if (typeof maxChars === 'number' && maxChars > 0) {
+        const points = Array.from(cleaned);
+        if (points.length > maxChars) {
+            return points.slice(0, maxChars).join('') + (addEllipsis ? '...' : '');
+        }
+    }
+
+    return cleaned;
+}

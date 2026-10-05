@@ -32,7 +32,7 @@ import {
     setAdminState
 } from '../services/welcome.service';
 import { getMainMenuKeyboard } from './start.handler';
-import { escapeHtml } from '../utils/telegram-format';
+import { escapeHtml, safeUtf8Slice } from '../utils/telegram-format';
 import fs from 'fs';
 import path from 'path';
 
@@ -557,7 +557,7 @@ adminHandler.callbackQuery('admin_conversations', async (ctx) => {
     const items = convs.map((c) => {
         const icon = c.role === 'user' ? '👤 <b>User</b>' : '🤖 <b>Gemini</b>';
         const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleTimeString('km-KH', { hour: '2-digit', minute: '2-digit' }) : '';
-        const snippet = c.content.length > 150 ? c.content.substring(0, 150) + '...' : c.content;
+        const snippet = safeUtf8Slice(c.content, 150);
         return `${icon} (<code>${c.userId}</code> | ${dateStr}):\n<i>"${escapeHtml(snippet)}"</i>`;
     }).join('\n\n');
 
@@ -678,7 +678,7 @@ adminHandler.command('history', async (ctx) => {
     const items = convs.map((c) => {
         const icon = c.role === 'user' ? '👤 <b>User</b>' : '🤖 <b>AI</b>';
         const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleTimeString() : '';
-        const snippet = c.content.length > 200 ? c.content.substring(0, 200) + '...' : c.content;
+        const snippet = safeUtf8Slice(c.content, 200);
         return `${icon} (<code>${dateStr}</code>):\n<i>"${escapeHtml(snippet)}"</i>`;
     }).join('\n\n');
 
@@ -687,7 +687,13 @@ adminHandler.command('history', async (ctx) => {
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         items;
 
-    await ctx.reply(text, { parse_mode: 'HTML' });
+    try {
+        await ctx.reply(text, { parse_mode: 'HTML' });
+    } catch (err: any) {
+        logger.warn('ADMIN', `HTML reply failed for /history ${targetId}: ${err.message}. Falling back to plain text.`);
+        const plain = text.replace(/<[^>]*>/g, '');
+        await ctx.reply(safeUtf8Slice(plain, 4000));
+    }
 });
 
 // View User Dialogues Callback
@@ -704,7 +710,7 @@ adminHandler.callbackQuery(/^admin_user_conv:(\d+)$/, async (ctx) => {
     const items = convs.map((c) => {
         const icon = c.role === 'user' ? '👤 <b>User</b>' : '🤖 <b>AI</b>';
         const dateStr = c.createdAt ? new Date(c.createdAt).toLocaleTimeString() : '';
-        const snippet = c.content.length > 200 ? c.content.substring(0, 200) + '...' : c.content;
+        const snippet = safeUtf8Slice(c.content, 200);
         return `${icon} (<code>${dateStr}</code>):\n<i>"${escapeHtml(snippet)}"</i>`;
     }).join('\n\n');
 
@@ -713,7 +719,13 @@ adminHandler.callbackQuery(/^admin_user_conv:(\d+)$/, async (ctx) => {
         `━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
         items;
 
-    await ctx.reply(text, { parse_mode: 'HTML' });
+    try {
+        await ctx.reply(text, { parse_mode: 'HTML' });
+    } catch (err: any) {
+        logger.warn('ADMIN', `HTML reply failed for admin_user_conv:${targetId}: ${err.message}. Falling back to plain text.`);
+        const plain = text.replace(/<[^>]*>/g, '');
+        await ctx.reply(safeUtf8Slice(plain, 4000));
+    }
 });
 
 // ==========================================
