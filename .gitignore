@@ -29,4 +29,5 @@ Thumbs.db
 .idea/
 .claude/
 deploy.zip
+*.rar
 deploy.sftp
