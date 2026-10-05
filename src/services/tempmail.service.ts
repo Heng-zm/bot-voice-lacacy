@@ -126,7 +126,8 @@ export function extractActionLinks(htmlOrText = ''): { label: string; url: strin
 
 async function getAvailableDomain(): Promise<string> {
     const res = await fetch(`${API_BASE}/domains`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' }
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(10000)
     });
     if (!res.ok) throw new Error(`Failed to fetch domains: ${res.statusText}`);
     const data: any = await res.json();
@@ -152,7 +153,8 @@ export async function createTempAccount(userId: number): Promise<TempMailAccount
             'Content-Type': 'application/json',
             'User-Agent': 'Mozilla/5.0'
         },
-        body: JSON.stringify({ address, password })
+        body: JSON.stringify({ address, password }),
+        signal: AbortSignal.timeout(10000)
     });
 
     if (!createRes.ok) {
@@ -169,7 +171,8 @@ export async function createTempAccount(userId: number): Promise<TempMailAccount
             'Content-Type': 'application/json',
             'User-Agent': 'Mozilla/5.0'
         },
-        body: JSON.stringify({ address, password })
+        body: JSON.stringify({ address, password }),
+        signal: AbortSignal.timeout(10000)
     });
 
     if (!tokenRes.ok) {

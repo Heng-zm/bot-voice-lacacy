@@ -64,19 +64,21 @@ export function getRedisClient(): Redis | null {
 }
 
 export function isRedisConnected(): boolean {
-    return isConnected && redisClient !== null;
+    return redisClient !== null && (isConnected || redisClient.status === 'ready');
 }
 
 export async function pingRedis(): Promise<{ connected: boolean; latencyMs?: number; error?: string }> {
-    if (!redisClient || !isConnected) {
-        return { connected: false, error: 'Redis client not connected' };
+    if (!redisClient) {
+        return { connected: false, error: 'Redis client not initialized' };
     }
     const start = Date.now();
     try {
         const pong = await redisClient.ping();
         const latencyMs = Date.now() - start;
+        isConnected = (pong === 'PONG');
         return { connected: pong === 'PONG', latencyMs };
     } catch (err: any) {
+        isConnected = false;
         return { connected: false, error: err.message };
     }
 }

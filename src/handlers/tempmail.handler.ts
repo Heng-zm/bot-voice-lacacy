@@ -437,8 +437,13 @@ export function initRealtimeMailWatcher(bot: Bot) {
                 reply_markup: keyboard,
                 disable_notification: !notifOn
             });
-        } catch (err) {
-            logger.error('TEMPMAIL_PUSH', `Failed to push realtime email notification to user ${userId}`, err);
+        } catch (err: any) {
+            if (err?.error_code === 403 || err?.description?.includes('blocked by the user')) {
+                logger.info('TEMPMAIL_PUSH', `User ${userId} blocked bot, removing from active mailbox polling.`);
+                deleteTempAccount(userId).catch(() => {});
+            } else {
+                logger.error('TEMPMAIL_PUSH', `Failed to push realtime email notification to user ${userId}`, err);
+            }
         }
     });
 }

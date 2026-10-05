@@ -27,7 +27,14 @@ if (!config.BOT_TOKEN) {
     throw new Error('BOT_TOKEN is missing');
 }
 
-const bot = new Bot(config.BOT_TOKEN);
+const bot = new Bot(config.BOT_TOKEN, {
+    client: {
+        timeoutSeconds: 45
+    }
+});
+
+// In-memory set for active users to eliminate redundant Redis SADD network roundtrips on every update
+const activeUsersInMemory = new Set<number>();
 
 // In-memory cache for throttling Supabase user profile syncs (max once per 6 hours per user)
 const syncedUsersMemory = new Map<number, number>();
@@ -85,7 +92,14 @@ bot.use(async (ctx, next) => {
     }
 
     if (user?.id) {
-        redisSAdd('bot:active_users', user.id).catch(() => {});
+        if (!activeUsersInMemory.has(user.id)) {
+            activeUsersInMemory.add(user.id);
+            if (activeUsersInMemory.size > 5000) {
+                const oldest = activeUsersInMemory.values().next().value;
+                if (oldest) activeUsersInMemory.delete(oldest);
+            }
+            redisSAdd('bot:active_users', user.id).catch(() => {});
+        }
         throttleSyncUser(user).catch(() => {});
     }
 
@@ -291,6 +305,7 @@ async function startConcurrentBot() {
                 // Derive chat identifier (or fallback to update_id for unassociated updates)
                 const chatId = update.message?.chat?.id ||
                                update.callback_query?.message?.chat?.id ||
+                               update.callback_query?.from?.id ||
                                update.inline_query?.from?.id ||
                                update.update_id;
 

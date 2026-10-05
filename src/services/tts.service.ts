@@ -303,7 +303,7 @@ export async function generateNeuralTTS(
             voice,
             lang: edgeLang,
             outputFormat: 'audio-24khz-96kbitrate-mono-mp3',
-            timeout: 60000
+            timeout: 15000
         });
         await edgeTts.ttsPromise(clean.substring(0, 1500), outputPath);
 
@@ -321,7 +321,7 @@ export async function generateNeuralTTS(
             voice,
             lang: edgeLang,
             outputFormat: 'audio-24khz-48kbitrate-mono-mp3',
-            timeout: 60000
+            timeout: 15000
         });
         await retryEdgeTts.ttsPromise(clean.substring(0, 1200), outputPath);
 
@@ -425,6 +425,10 @@ export function getUserVoiceGender(userId?: number): VoiceGender {
 
 export function setUserVoiceGender(userId: number, gender: VoiceGender): void {
     userVoiceGenders.set(userId, gender);
+    if (userVoiceGenders.size > 5000) {
+        const oldest = userVoiceGenders.keys().next().value;
+        if (oldest) userVoiceGenders.delete(oldest);
+    }
     redisSet(`user:gender:${userId}`, gender, 30 * 86400).catch(() => {});
     updateUserPrefsInSupabase(userId, { gender }).catch(() => {});
 }
@@ -511,6 +515,10 @@ export function getUserVoicePreference(userId?: number): SupportedTTSLanguage | 
 
 export function setUserVoicePreference(userId: number, pref: SupportedTTSLanguage | 'auto'): void {
     userVoicePreferences.set(userId, pref);
+    if (userVoicePreferences.size > 5000) {
+        const oldest = userVoicePreferences.keys().next().value;
+        if (oldest) userVoicePreferences.delete(oldest);
+    }
     redisSet(`user:voice:${userId}`, pref, 30 * 86400).catch(() => {});
 }
 

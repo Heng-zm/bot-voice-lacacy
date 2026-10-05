@@ -13,7 +13,7 @@ import path from 'path';
 export const downloaderHandler = new Composer();
 
 // Enhanced downloader regex matching various media links including short links
-const urlRegex = /(https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|instagram\.com)[^\s]+)/i;
+const urlRegex = /(https?:\/\/(?:[a-zA-Z0-9-]+\.)?(?:tiktok\.com|douyin\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|instagram\.com|threads\.net|twitter\.com|x\.com|pinterest\.com|pin\.it)[^\s]+)/i;
 
 export function getMediaPlatformBadge(url: string): { name: string; emoji: string } {
     const lower = (url || '').toLowerCase();
@@ -80,7 +80,8 @@ downloaderHandler.callbackQuery('delete_this_msg', async (ctx) => {
 downloaderHandler.hears(urlRegex, async (ctx) => {
     const userId = ctx.from?.id;
     const isKm = getUserLanguage(userId) === 'km';
-    const url = ctx.match[1];
+    const rawUrl = ctx.match[1];
+    const url = rawUrl.replace(/[),.!?>;:]+$/, '');
     const userMsgId = ctx.message?.message_id;
 
     if (userId && !config.ADMIN_IDS.includes(userId)) {

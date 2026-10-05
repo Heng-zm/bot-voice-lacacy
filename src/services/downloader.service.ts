@@ -98,7 +98,7 @@ export function validateSafeMediaUrl(rawUrl: string): { isValid: boolean; saniti
     );
 
     if (!isAllowedDomain) {
-        return { isValid: false, error: 'Domain not supported. Only TikTok, YouTube, Facebook, and Instagram are allowed.' };
+        return { isValid: false, error: 'Domain not supported. Supported: TikTok, YouTube, Facebook, Instagram, Twitter/X, Threads, Pinterest.' };
     }
 
     return { isValid: true, sanitizedUrl: parsed.toString() };
@@ -177,7 +177,9 @@ export async function downloadMedia(url: string): Promise<string | null> {
             quiet: true,
             noPlaylist: true,      // Security: never download entire multi-gigabyte playlists
             maxFilesize: '50M',    // Security: reject streams larger than 50MB
-            socketTimeout: 30      // Security: prevent hanging connections
+            socketTimeout: 30,     // Security: prevent hanging connections
+            concurrentFragments: 4, // Performance: multi-stream fragment acceleration
+            bufferSize: '16K'
         };
 
         if (ffmpegPath) {
@@ -242,7 +244,9 @@ export async function downloadAudio(url: string): Promise<string | null> {
             quiet: true,
             noPlaylist: true,      // Security: never download entire playlists
             maxFilesize: '50M',    // Security: reject audio streams larger than 50MB
-            socketTimeout: 30
+            socketTimeout: 30,
+            concurrentFragments: 4, // Performance: multi-stream fragment acceleration
+            bufferSize: '16K'
         };
 
         if (ffmpegPath) {

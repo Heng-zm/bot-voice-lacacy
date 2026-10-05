@@ -404,15 +404,16 @@ adminHandler.command('supabase', async (ctx) => {
     }
 
     const recentUsersList = summary.recentUsers.map((u, i) => {
-        const name = u.firstName || u.username || 'User';
-        const handle = u.username ? `@${u.username}` : `ID: ${u.userId}`;
+        const name = escapeHtml(u.firstName || u.username || 'User');
+        const handle = u.username ? `@${escapeHtml(u.username)}` : `ID: ${u.userId}`;
         const time = u.lastActive ? new Date(u.lastActive).toLocaleDateString() : 'N/A';
         return `   ${i + 1}. <b>${name}</b> (${handle}) [<code>${time}</code>]`;
     }).join('\n');
 
     const recentDonationsList = summary.recentDonations.length > 0
         ? summary.recentDonations.map((d, i) => {
-            return `   ${i + 1}. <b>${d.fullName || 'Anonymous'}</b>: <code>$${d.amount} ${d.currency}</code> (${d.status})`;
+            const donorName = escapeHtml(d.fullName || 'Anonymous');
+            return `   ${i + 1}. <b>${donorName}</b>: <code>$${d.amount} ${escapeHtml(d.currency)}</code> (${escapeHtml(d.status)})`;
         }).join('\n')
         : '   <i>(មិនទាន់មាន)</i>';
 

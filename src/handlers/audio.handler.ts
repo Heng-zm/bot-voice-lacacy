@@ -318,7 +318,7 @@ audioHandler.command(['chat', 'ask', 'ai'], async (ctx) => {
     }
 
     try {
-        const progress = await startProcessingAnimation(ctx, t.animation_ai, 800, ctx.message?.message_id);
+        const progress = await startProcessingAnimation(ctx, t.animation_ai, 1200, ctx.message?.message_id);
         try {
             const systemPrompt = isKm
                 ? "You are a warm, polite, respectful, and intelligent AI assistant. When responding in Khmer, use natural, grammatically correct, polite, and friendly Khmer phrasing (ភាសាខ្មែរដែលគួរសម រួសរាយ និងត្រឹមត្រូវ). Format your response neatly with clear headings, bold key points, bullet lists, or code blocks where helpful. Keep answers concise, helpful, and well-structured."
@@ -407,8 +407,6 @@ audioHandler.on('message:text', async (ctx, next) => {
                     : detectLanguage(ctx.message.text, isKm ? 'km' : 'en');
                 const prefGender = getUserVoiceGender(userId);
                 const audioPath = await generateNeuralTTS(ctx.message.text, lang, prefGender);
-                await ctx.api.deleteMessage(ctx.chat.id, progress.messageId).catch(() => {});
-
                 if (audioPath && fs.existsSync(audioPath)) {
                     const token = createTTSToken();
                     await saveTTSTextCache(token, ctx.message.text, lang, undefined, prefGender);
@@ -432,6 +430,7 @@ audioHandler.on('message:text', async (ctx, next) => {
                 }
             } finally {
                 progress.stop();
+                await ctx.api.deleteMessage(ctx.chat.id, progress.messageId).catch(() => {});
             }
         } catch (err: any) {
             logger.error('TTS_MODE', 'TTS generation failed in TTS mode', err, { userId });
@@ -460,7 +459,7 @@ audioHandler.on('message:text', async (ctx, next) => {
         }
 
         // Start dynamic "AI Thinking" animation with typing indicator replying to user's question
-        const progress = await startProcessingAnimation(ctx, t.animation_ai, 800, ctx.message.message_id);
+        const progress = await startProcessingAnimation(ctx, t.animation_ai, 1200, ctx.message.message_id);
 
         try {
             const systemPrompt = isKm
@@ -836,9 +835,9 @@ audioHandler.on(':voice', async (ctx) => {
         await ctx.api.editMessageText(
             ctx.chat.id,
             processingMsg.message_id,
-            isKm ? `🥺 សូមអភ័យទោស មិនអាចស្តាប់សារសំឡេងបានទេ៖ ${escapeHtml(error.message)}` : `🥺 Sorry, I couldn't transcribe that voice note: ${escapeHtml(error.message)}`,
+            isKm ? `🥺 សូមអភ័យទោស មិនអាចស្តាប់សារសំឡេងបានទេ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Sorry, I couldn't transcribe that voice note: ${escapeHtml(error?.message || 'Error')}`,
             { parse_mode: 'HTML' }
-        );
+        ).catch(() => {});
     } finally {
         if (localVoicePath && fs.existsSync(localVoicePath)) {
             try { fs.unlinkSync(localVoicePath); } catch (e) {}

@@ -152,9 +152,9 @@ async function processImageFile(ctx: any, fileId: string) {
         await ctx.api.editMessageText(
             ctx.chat.id, 
             processingMsg.message_id, 
-            isKm ? `🥺 សូមអភ័យទោស មិនអាចដំណើរការរូបភាពនេះទេ៖ ${escapeHtml(error.message)}` : `🥺 Sorry, I couldn't process that image: ${escapeHtml(error.message)}`,
+            isKm ? `🥺 សូមអភ័យទោស មិនអាចដំណើរការរូបភាពនេះទេ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Sorry, I couldn't process that image: ${escapeHtml(error?.message || 'Error')}`,
             { parse_mode: 'HTML' }
-        );
+        ).catch(() => {});
     } finally {
         if (filePath && fs.existsSync(filePath)) {
             try { fs.unlinkSync(filePath); } catch (e) {}
@@ -221,8 +221,8 @@ visionHandler.callbackQuery('translate_khmer', async (ctx) => {
     } catch (error: any) {
         logger.error('VISION_TRANSLATE', 'OCR text translation to Khmer failed', error, { userId: ctx.from?.id });
         await ctx.editMessageText(
-            isKm ? `🥺 ការបកប្រែបរាជ័យ៖ ${escapeHtml(error.message)}` : `🥺 Translation failed: ${escapeHtml(error.message)}`, 
+            isKm ? `🥺 ការបកប្រែបរាជ័យ៖ ${escapeHtml(error?.message || 'Error')}` : `🥺 Translation failed: ${escapeHtml(error?.message || 'Error')}`, 
             { parse_mode: 'HTML' }
-        );
+        ).catch(() => {});
     }
 });

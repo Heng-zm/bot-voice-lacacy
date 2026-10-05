@@ -148,10 +148,17 @@ startHandler.command('start', async (ctx) => {
             }
         }
 
-        await ctx.reply(formattedCaption, {
-            parse_mode: 'HTML',
-            reply_markup: getMainMenuKeyboard(userId)
-        });
+        try {
+            await ctx.reply(formattedCaption, {
+                parse_mode: 'HTML',
+                reply_markup: getMainMenuKeyboard(userId)
+            });
+        } catch (textErr) {
+            logger.warn('START_CUSTOM_WELCOME', 'HTML parse error in custom welcome, fallback to plain text', textErr);
+            await ctx.reply(customWelcome.caption || 'Welcome!', {
+                reply_markup: getMainMenuKeyboard(userId)
+            });
+        }
         return;
     }
 
@@ -231,14 +238,16 @@ startHandler.command(['clean', 'clear'], async (ctx) => {
     } catch (e) {}
 
     // Clean recent messages safely without triggering Telegram API flood limits
-    const messageIds = Array.from({ length: 15 }, (_, i) => currentId - (i + 1));
+    const messageIds = Array.from({ length: 15 }, (_, i) => currentId - (i + 1)).filter(id => id > 0);
     try {
-        if (typeof (ctx.api as any).deleteMessages === 'function') {
-            await (ctx.api as any).deleteMessages(chatId, messageIds).catch(() => {});
-        } else {
-            for (const id of messageIds) {
-                await ctx.api.deleteMessage(chatId, id).catch(() => {});
-                await new Promise(r => setTimeout(r, 40));
+        if (messageIds.length > 0) {
+            if (typeof (ctx.api as any).deleteMessages === 'function') {
+                await (ctx.api as any).deleteMessages(chatId, messageIds).catch(() => {});
+            } else {
+                for (const id of messageIds) {
+                    await ctx.api.deleteMessage(chatId, id).catch(() => {});
+                    await new Promise(r => setTimeout(r, 40));
+                }
             }
         }
     } catch {}

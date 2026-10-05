@@ -72,24 +72,24 @@ export async function syncUserToSupabase(user: {
     try {
         const now = new Date().toISOString();
 
-        // 1. Upsert into subscribers table
-        await supabase
-            .from('subscribers')
-            .upsert({
-                chat_id: user.id,
-                created_at: now
-            }, { onConflict: 'chat_id' });
-
-        // 2. Upsert into user_prefs table
-        await supabase
-            .from('user_prefs')
-            .upsert({
-                user_id: user.id,
-                username: user.username || null,
-                first_name: user.firstName || null,
-                last_active: now,
-                updated_at: now
-            }, { onConflict: 'user_id' });
+        // 1 & 2. Upsert into subscribers and user_prefs tables concurrently
+        await Promise.all([
+            supabase
+                .from('subscribers')
+                .upsert({
+                    chat_id: user.id,
+                    created_at: now
+                }, { onConflict: 'chat_id' }),
+            supabase
+                .from('user_prefs')
+                .upsert({
+                    user_id: user.id,
+                    username: user.username || null,
+                    first_name: user.firstName || null,
+                    last_active: now,
+                    updated_at: now
+                }, { onConflict: 'user_id' })
+        ]);
 
         logger.debug('SUPABASE', `Synced user ${user.id} (@${user.username || 'unknown'}) to Supabase`);
     } catch (err: any) {
@@ -174,7 +174,7 @@ export async function fetchSupabaseSummary(): Promise<SupabaseSummary | null> {
             supabase.from('user_prefs').select('*', { count: 'exact', head: true }),
             supabase.from('conversation_history').select('*', { count: 'exact', head: true }),
             supabase.from('donations').select('*', { count: 'exact', head: true }),
-            supabase.from('user_prefs').select('user_id, username, first_name, last_active').order('last_active', { ascending: false }).limit(5),
+            supabase.from('user_prefs').select('user_id, username, first_name, last_active').order('last_active', { ascending: false, nullsFirst: false }).limit(5),
             supabase.from('donations').select('id, full_name, amount, currency, status, created_at').order('created_at', { ascending: false }).limit(3)
         ]);
 

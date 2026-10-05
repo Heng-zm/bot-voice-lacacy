@@ -11,6 +11,10 @@ export function getUserLanguage(userId?: number): Language {
 
 export function setUserLanguage(userId: number, lang: Language): void {
     userLanguages.set(userId, lang);
+    if (userLanguages.size > 5000) {
+        const oldest = userLanguages.keys().next().value;
+        if (oldest) userLanguages.delete(oldest);
+    }
     redisSet(`user:lang:${userId}`, lang, 30 * 86400).catch(() => {});
 }
 
@@ -36,6 +40,10 @@ export function getUserNotificationPreference(userId?: number): boolean {
 
 export function setUserNotificationPreference(userId: number, enabled: boolean): void {
     userNotifs.set(userId, enabled);
+    if (userNotifs.size > 5000) {
+        const oldest = userNotifs.keys().next().value;
+        if (oldest) userNotifs.delete(oldest);
+    }
     redisSet(`user:notif:${userId}`, enabled ? '1' : '0', 30 * 86400).catch(() => {});
 }
 

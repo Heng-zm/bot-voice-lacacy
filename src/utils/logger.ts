@@ -89,22 +89,25 @@ class Logger {
     private appendToFile(filePath: string, line: string) {
         try {
             const cleanLine = this.maskSecrets(this.stripAnsi(line)) + '\n';
-            fs.appendFileSync(filePath, cleanLine, 'utf8');
-
-            this.logWriteCounter++;
-            // Check rotation only once every 500 writes to prevent disk thrashing
-            if (this.logWriteCounter % 500 === 0) {
-                try {
-                    const stat = fs.statSync(filePath);
-                    if (stat.size > 5 * 1024 * 1024) {
-                        const content = fs.readFileSync(filePath, 'utf8');
-                        const lines = content.split('\n');
-                        if (lines.length > 10000) {
-                            fs.writeFileSync(filePath, lines.slice(-5000).join('\n'), 'utf8');
+            fs.appendFile(filePath, cleanLine, 'utf8', (err) => {
+                if (err) return;
+                this.logWriteCounter++;
+                // Check rotation asynchronously only once every 500 writes
+                if (this.logWriteCounter % 500 === 0) {
+                    fs.stat(filePath, (statErr, stat) => {
+                        if (statErr || !stat) return;
+                        if (stat.size > 5 * 1024 * 1024) {
+                            fs.readFile(filePath, 'utf8', (readErr, content) => {
+                                if (readErr || !content) return;
+                                const lines = content.split('\n');
+                                if (lines.length > 10000) {
+                                    fs.writeFile(filePath, lines.slice(-5000).join('\n'), 'utf8', () => {});
+                                }
+                            });
                         }
-                    }
-                } catch (e) {}
-            }
+                    });
+                }
+            });
         } catch (e) {
             // Fail silently on disk write issues to prevent process death
         }

@@ -256,6 +256,9 @@ export async function sendOrEditAiResponse(
                     firstMsgId = targetMessageId;
                 } catch (fallbackErr: any) {
                     logger.error('AI_FORMAT', 'Plain text fallback edit also failed, sending fresh reply', fallbackErr);
+                    try {
+                        await ctx.api.deleteMessage(ctx.chat.id, targetMessageId);
+                    } catch (delErr) {}
                     const sent = await ctx.reply(chunkText, {
                         parse_mode: 'HTML',
                         reply_markup: markup,

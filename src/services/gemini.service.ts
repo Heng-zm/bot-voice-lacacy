@@ -141,8 +141,22 @@ RESPONSE: <your friendly response>`
         const matchTrans = text.match(/TRANSCRIPTION:\s*([\s\S]*?)(?=RESPONSE:|$)/i);
         const matchResp = text.match(/RESPONSE:\s*([\s\S]*$)/i);
 
-        const transcription = matchTrans ? matchTrans[1].trim() : text.trim();
-        const reply = matchResp ? matchResp[1].trim() : "I heard your voice note! Feel free to ask anything else.";
+        let transcription = '';
+        let reply = '';
+
+        if (matchTrans && matchResp) {
+            transcription = matchTrans[1].trim();
+            reply = matchResp[1].trim();
+        } else if (matchTrans && !matchResp) {
+            transcription = matchTrans[1].trim();
+            reply = text.replace(matchTrans[0], '').trim() || "I heard your voice note! Feel free to ask anything else.";
+        } else if (!matchTrans && matchResp) {
+            transcription = text.replace(matchResp[0], '').trim() || "(Voice note)";
+            reply = matchResp[1].trim();
+        } else {
+            transcription = "(Voice note)";
+            reply = text.trim() || "I heard your voice note! Feel free to ask anything else.";
+        }
 
         return { transcription, reply };
     } catch (error: any) {

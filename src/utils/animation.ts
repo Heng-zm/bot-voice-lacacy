@@ -61,6 +61,7 @@ export async function startProcessingAnimation(
     const initial = await ctx.reply(frames[0], replyOptions);
     let stopped = false;
     let frameIndex = 1;
+    let lastChatActionTime = Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     // Send immediate typing action
@@ -68,7 +69,11 @@ export async function startProcessingAnimation(
 
     const tick = async () => {
         if (stopped || frames.length < 2) return;
-        try { ctx.replyWithChatAction('typing').catch(() => {}); } catch (e) {}
+        const now = Date.now();
+        if (now - lastChatActionTime >= 4000) {
+            lastChatActionTime = now;
+            try { ctx.replyWithChatAction('typing').catch(() => {}); } catch (e) {}
+        }
         await safeEditMessage(ctx, initial.message_id, frames[frameIndex]);
         frameIndex = (frameIndex + 1) % frames.length;
         if (!stopped) timer = setTimeout(tick, intervalMs);
